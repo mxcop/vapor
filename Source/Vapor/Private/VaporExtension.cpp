@@ -4,7 +4,7 @@ IMPLEMENT_GLOBAL_SHADER(FCustomShader, "/Plugins/Vapor/PostProcessCS.usf", "Main
 
 namespace {
 	TAutoConsoleVariable<int32> CVarShaderOn(
-		TEXT("r.EnableVapor"),
+		TEXT("r.Vapor"),
 		0,
 		TEXT("Enable Vapor Cloud Rendering \n")
 		TEXT(" 0: OFF;")
@@ -63,6 +63,7 @@ FScreenPassTexture FVaporExtension::CustomPostProcessing(FRDGBuilder& GraphBuild
 		FCustomShader::FParameters* PassParameters = GraphBuilder.AllocParameters<FCustomShader::FParameters>();
 
 		// Input is the SceneColor from PostProcess Material Inputs
+		PassParameters->View = SceneView.ViewUniformBuffer;
 		PassParameters->OriginalSceneColor = SceneColor.Texture;
 
 		// Use ScreenPassTextureViewportParameters so we don't need to calculate these ourselves

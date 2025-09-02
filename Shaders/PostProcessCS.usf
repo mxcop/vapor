@@ -8,10 +8,23 @@
 #include "/Engine/Private/ScreenPass.ush"
 
 // Shader parameters
-float3 GetTranslatedWorldPositionFromScreenUV(float2 ScreenUV, float SceneDepth)
-{
+float3 GetTranslatedWorldPositionFromScreenUV(float2 ScreenUV, float SceneDepth) {
     float2 ScreenPosition = (ScreenUV - View.ScreenPositionScaleBias.wz) / View.ScreenPositionScaleBias.xy;
     return mul(float4(GetScreenPositionForProjectionType(ScreenPosition, SceneDepth), SceneDepth, 1), PrimaryView.ScreenToTranslatedWorld).xyz;
+}
+
+float3 GetCameraPosition() {
+    return mul(float4(0.0, 0.0, 0.0, 1.0), PrimaryView.ScreenToTranslatedWorld).xyz;
+}
+
+float2 Sphere(float3 ro, float3 rd, float3 ce, float ra) {
+    float3 oc = ro - ce;
+    float b = dot(oc, rd);
+    float3 qc = oc - b * rd;
+    float h = ra * ra - dot(qc, qc);
+    if (h < 0.0) return float2(-1.0, -1.0);
+    h = sqrt(h);
+    return float2(-b - h, -b + h);
 }
 
 // SceneColor texture
@@ -34,10 +47,20 @@ void MainCS(uint2 DispatchThreadId : SV_DispatchThreadID)
     }
 	
     // Calculate SampleUV with viewport parameters
-    float2 sampleUV = (float2(SceneColorViewport_ViewportMin) + (DispatchThreadId + 0.5)) * SceneColorViewport_ExtentInverse;
-
-    float3 dir = GetTranslatedWorldPositionFromScreenUV(sampleUV, 1.0);
-    Output[SceneColorViewport_ViewportMin + DispatchThreadId] = float4(dir * 0.5 + 0.5, 1.0);
+    const float2 uv = (float2(SceneColorViewport_ViewportMin) + (DispatchThreadId + 0.5)) * SceneColorViewport_ExtentInverse;
+    
+    const float3 ro = View.WorldViewOriginHigh;
+    const float3 rd = normalize(GetTranslatedWorldPositionFromScreenUV(uv, 1.0));
+    const float2 t = Sphere(ro, rd, float3(0.0, 0.0, 100.0), 100.0);
+    
+    if (t.x > 0.0) {
+        const float3 normal = normalize((ro + rd * t.x) - float3(0.0, 0.0, 100.0));
+        Output[SceneColorViewport_ViewportMin + DispatchThreadId] = float4(normal * 0.5 + 0.5, 1.0);
+    } else {
+        Output[SceneColorViewport_ViewportMin + DispatchThreadId] = OriginalSceneColor.SampleLevel(GlobalPointClampedSampler, uv, 0);
+    }
+    
+    // Output[SceneColorViewport_ViewportMin + DispatchThreadId] = float4(ro, 1.0);
     
     // Reconstruct NDC space [-1, 1]
 //    float2 ndc = sampleUV * 2.0f - 1.0f;
