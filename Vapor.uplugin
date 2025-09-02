@@ -1,0 +1,27 @@
+{
+	"FileVersion": 3,
+	"Version": 1,
+	"VersionName": "1.0",
+	"FriendlyName": "Vapor",
+	"Description": "Physically-based cloud rendering.",
+	"Category": "Rendering",
+	"CreatedBy": "Max Coppen",
+	"CreatedByURL": "https://github.com/mxcop",
+	"DocsURL": "",
+	"MarketplaceURL": "",
+	"SupportURL": "",
+	"CanContainContent": true,
+	"IsBetaVersion": false,
+	"IsExperimentalVersion": false,
+	"Installed": false,
+	"Modules": [
+		{
+			"Name": "Vapor",
+			"Type": "Runtime",
+            "LoadingPhase": "PostConfigInit",
+            "CanHotReload": false,
+            "WhitelistPlatforms": [ "Win64" ]
+		}
+	],
+    "EnabledByDefault": false
+}
