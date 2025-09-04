@@ -1,4 +1,4 @@
-#include "Vapor.h"
+#include "VaporModule.h"
 
 #define LOCTEXT_NAMESPACE "Vapor"
 

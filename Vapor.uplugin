@@ -14,14 +14,21 @@
 	"IsBetaVersion": false,
 	"IsExperimentalVersion": false,
 	"Installed": false,
+	"SupportedTargetPlatforms": [
+		"Win64"
+	],
 	"Modules": [
 		{
 			"Name": "Vapor",
 			"Type": "Runtime",
-            "LoadingPhase": "PostConfigInit",
-            "CanHotReload": false,
-            "WhitelistPlatforms": [ "Win64" ]
+			"LoadingPhase": "PostConfigInit",
+			"CanHotReload": false
+		},
+		{
+			"Name": "Boiler",
+			"Type": "Editor",
+			"LoadingPhase": "Default"
 		}
 	],
-    "EnabledByDefault": false
+	"EnabledByDefault": false
 }
