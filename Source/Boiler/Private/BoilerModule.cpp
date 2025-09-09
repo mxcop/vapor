@@ -1,8 +1,6 @@
 #include "BoilerModule.h"
 
 THIRD_PARTY_INCLUDES_START
-#define M_PI 3.14
-#define M_PI_2 6.28
 #include <openvdb/openvdb.h>
 THIRD_PARTY_INCLUDES_END
 
@@ -14,11 +12,9 @@ void FBoiler::StartupModule() {
 	openvdb::initialize();
 	openvdb::io::File file(TCHAR_TO_UTF8(*VdbDir));
 	const uint64_t size = file.getSize();
-	// UE_LOG(LogInit, Warning, TEXT("The file size is: %u"), size);
 
 #if PLATFORM_WINDOWS
 	const FString FormattedMessage = FString::Printf(TEXT("The file size is: %u"), size);
-	//FPlatformMisc::MessageBoxExt(EAppMsgType::Ok, *VdbDir, TEXT("Debug"));
 	FPlatformMisc::MessageBoxExt(EAppMsgType::Ok,
 		*FormattedMessage, TEXT("Debug"));
 #endif

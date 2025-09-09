@@ -1,5 +1,7 @@
 #include "VaporExtension.h"
 
+#include "PostProcess/PostProcessInputs.h"
+
 IMPLEMENT_GLOBAL_SHADER(FCustomShader, "/Plugins/Vapor/PostProcessCS.usf", "MainCS", SF_Compute);
 
 namespace {
@@ -16,82 +18,50 @@ FVaporExtension::FVaporExtension(const FAutoRegister& AutoRegister) : FSceneView
 	UE_LOG(LogTemp, Log, TEXT("Vapor: Custom SceneViewExtension registered"));
 }
 
-void FVaporExtension::SubscribeToPostProcessingPass(EPostProcessingPass PassId, const FSceneView& View, FAfterPassCallbackDelegateArray& InOutPassCallbacks, bool bIsPassEnabled) {
-	// Define to what Post Processing stage to hook the SceneViewExtension into. See SceneViewExtension.h and PostProcessing.cpp for more info
-	if (PassId == EPostProcessingPass::MotionBlur) {
-		InOutPassCallbacks.Add(FAfterPassCallbackDelegate::CreateRaw(this, &FVaporExtension::CustomPostProcessing));
-	}
-}
-
-FScreenPassTexture FVaporExtension::CustomPostProcessing(FRDGBuilder& GraphBuilder, const FSceneView& SceneView, const FPostProcessMaterialInputs& Inputs) {
-	// SceneViewExtension gives SceneView, not ViewInfo so we need to setup some basics
-	const FSceneViewFamily& ViewFamily = *SceneView.Family;
-
-	const FScreenPassTexture& SceneColor = FScreenPassTexture::CopyFromSlice(GraphBuilder, Inputs.GetInput(EPostProcessMaterialInput::SceneColor));
-
-	if (!SceneColor.IsValid() || CVarShaderOn.GetValueOnRenderThread() == 0) {
-		return SceneColor;
-	}
-
-	const FMatrix44f ViewProjection = (FMatrix44f)SceneView.ViewMatrices.GetViewProjectionMatrix();
+void FVaporExtension::PrePostProcessPass_RenderThread(FRDGBuilder& GraphBuilder, const FSceneView& SceneView, const FPostProcessingInputs& Inputs) {
+	/* Check if our extension is toggled ON */
+	if (CVarShaderOn.GetValueOnRenderThread() == 0) return;
 	
+	/* Start the render graph event scope */
+	RDG_EVENT_SCOPE(GraphBuilder, "Vapor Render Pass");
+	
+	/* Get the global shader map from our scene view */
+	FGlobalShaderMap* GlobalShaderMap = GetGlobalShaderMap(SceneView.Family->GetFeatureLevel());
+
+	/* Convert the scene color texture to a screen pass texture */
+	const FScreenPassTexture SceneColor = FScreenPassTexture(Inputs.SceneTextures->GetContents()->SceneColorTexture);
 	const FScreenPassTextureViewport SceneColorViewport(SceneColor);
 	
-	// Here starts the RDG stuff
-	RDG_EVENT_SCOPE(GraphBuilder, "Custom Postprocess Effect");
-	{
-		// Accesspoint to our Shaders
-		FGlobalShaderMap* GlobalShaderMap = GetGlobalShaderMap(ViewFamily.GetFeatureLevel());
+	/* Target texture creation info */
+	FRDGTextureDesc OutputDesc {};
+	OutputDesc = SceneColor.Texture->Desc;
+	OutputDesc.Reset();
+	OutputDesc.Flags |= TexCreate_UAV;
+	OutputDesc.Flags &= ~(TexCreate_RenderTargetable | TexCreate_FastVRAM);
+	const FLinearColor ClearColor(0., 0., 0., 0.);
+	OutputDesc.ClearValue = FClearValueBinding(ClearColor);
 
-		// Setup all the descriptors to create a target texture
-		FRDGTextureDesc OutputDesc;
-		{
-			OutputDesc = SceneColor.Texture->Desc;
+	/* Create a target texture we can write into */
+	const FRDGTextureRef OutputTexture = GraphBuilder.CreateTexture(OutputDesc, TEXT("Vapor Output"));
 
-			OutputDesc.Reset();
-			OutputDesc.Flags |= TexCreate_UAV;
-			OutputDesc.Flags &= ~(TexCreate_RenderTargetable | TexCreate_FastVRAM);
+	/* Allocate and fill-in the shader pass parameters */
+	FCustomShader::FParameters* PassParameters = GraphBuilder.AllocParameters<FCustomShader::FParameters>();
+	PassParameters->View = SceneView.ViewUniformBuffer;
+	PassParameters->OriginalSceneColor = SceneColor.Texture;
+	PassParameters->SceneColorViewport = GetScreenPassTextureViewportParameters(SceneColorViewport);
+	PassParameters->Output = GraphBuilder.CreateUAV(FRDGTextureUAVDesc(OutputTexture));
 
-			FLinearColor ClearColor(0., 0., 0., 0.);
-			OutputDesc.ClearValue = FClearValueBinding(ClearColor);
-		}
+	/* Calculate the group count based on the viewport size */
+	const FIntPoint ViewSize = SceneColor.ViewRect.Size();
+	const FIntVector DispatchCount = FComputeShaderUtils::GetGroupCount(ViewSize, FComputeShaderUtils::kGolden2DGroupSize);
 
-		// Create target texture
-		FRDGTextureRef OutputTexture = GraphBuilder.CreateTexture(OutputDesc, TEXT("Custom Effect Output Texture"));
+	/* Load our custom shader from the global shader map */
+	TShaderMapRef<FCustomShader> ComputeShader(GlobalShaderMap);
 
-		// Set the shader parameters
-		FCustomShader::FParameters* PassParameters = GraphBuilder.AllocParameters<FCustomShader::FParameters>();
+	FComputeShaderUtils::AddPass(GraphBuilder,
+		RDG_EVENT_NAME("Custom SceneViewExtension Post Processing CS Shader %dx%d", ViewSize.X, ViewSize.Y),
+		ComputeShader, PassParameters, DispatchCount);
 
-		// Input is the SceneColor from PostProcess Material Inputs
-		PassParameters->View = SceneView.ViewUniformBuffer;
-		PassParameters->OriginalSceneColor = SceneColor.Texture;
-
-		// Use ScreenPassTextureViewportParameters so we don't need to calculate these ourselves
-		PassParameters->SceneColorViewport = GetScreenPassTextureViewportParameters(SceneColorViewport);
-
-		FIntPoint PassViewSize = SceneColor.ViewRect.Size();
-		
-		// Create UAV from Target Texture
-		PassParameters->Output = GraphBuilder.CreateUAV(FRDGTextureUAVDesc(OutputTexture));
-
-		// Set Compute Shader and execute
-		FIntVector GroupCount = FComputeShaderUtils::GetGroupCount(PassViewSize, FComputeShaderUtils::kGolden2DGroupSize);
-
-		TShaderMapRef<FCustomShader> ComputeShader(GlobalShaderMap);
-
-		FComputeShaderUtils::AddPass(
-			GraphBuilder,
-			RDG_EVENT_NAME("Custom SceneViewExtension Post Processing CS Shader %dx%d", PassViewSize.X, PassViewSize.Y),
-			ComputeShader,
-			PassParameters,
-			GroupCount);
-
-		// Copy the output texture back to SceneColor
-		// Returning the new texture as ScreenPassTexture doesn't work, so this is pretty fast alternative
-		// Also with f.ex 'PrePostProcessPass_RenderThread' you get only input and something similar needs to be implemented then
-		AddCopyTexturePass(GraphBuilder, OutputTexture, SceneColor.Texture);
-	}
-
-	// The call expects ScreenPassTexture as a return, we return with the same texture as we started with, see AddCopyTexturePass above 
-	return SceneColor;
+	/* Finally copy our output texture back onto the scene color texture */
+	AddCopyTexturePass(GraphBuilder, OutputTexture, SceneColor.Texture);
 }
