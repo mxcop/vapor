@@ -1,6 +1,3 @@
-// Custom SceneViewExtension Template for Unreal Engine
-// Copyright 2023 - 2025 Ossi Luoto
-
 using UnrealBuildTool;
 using System.IO;
 
@@ -18,6 +15,7 @@ public class Vapor : ModuleRules
             "Renderer",
             "RHI",
             "Projects",
+            "SparseVolumeTexture"
             });
 
         var EngineDir = Path.GetFullPath(Target.RelativeEnginePath);

@@ -1,6 +1,8 @@
 #include "VaporExtension.h"
 
+#include "EngineUtils.h"
 #include "PostProcess/PostProcessInputs.h"
+#include "VaporComponent.h"
 
 IMPLEMENT_GLOBAL_SHADER(FCustomShader, "/Plugins/Vapor/PostProcessCS.usf", "MainCS", SF_Compute);
 
@@ -18,13 +20,37 @@ FVaporExtension::FVaporExtension(const FAutoRegister& AutoRegister) : FSceneView
 	UE_LOG(LogTemp, Log, TEXT("Vapor: Custom SceneViewExtension registered"));
 }
 
+void FVaporExtension::BeginRenderViewFamily(FSceneViewFamily& ViewFamily) {
+	/* Get the world from the scene */
+	UWorld* World = ViewFamily.Scene->GetWorld();
+	if (World == nullptr) return;
+
+	//TArray<FCloudscapeRenderData> Reservoir;
+
+	/* Collect all the actors into the reservoir */
+	for (TActorIterator<AVapor> It(World); It; ++It) {
+		//AVapor* MyActor = *It;
+		//if (MyActor == nullptr) continue;
+
+		FCloudscapeRenderData Data {};
+		Data.Position = (FVector3f)It->GetActorLocation();
+		FScopeLock Lock(&RenderDataLock);
+		RenderData = MoveTemp(Data);
+		//Reservoir.Add(Data);
+	}
+
+	/* Copy the reservoir using a thread-safe lock */
+	//FScopeLock Lock(&RenderDataLock);
+	//RenderData = MoveTemp(Reservoir);
+}
+
 void FVaporExtension::PrePostProcessPass_RenderThread(FRDGBuilder& GraphBuilder, const FSceneView& SceneView, const FPostProcessingInputs& Inputs) {
 	/* Check if our extension is toggled ON */
 	if (CVarShaderOn.GetValueOnRenderThread() == 0) return;
 	
 	/* Start the render graph event scope */
 	RDG_EVENT_SCOPE(GraphBuilder, "Vapor Render Pass");
-	
+
 	/* Get the global shader map from our scene view */
 	FGlobalShaderMap* GlobalShaderMap = GetGlobalShaderMap(SceneView.Family->GetFeatureLevel());
 
@@ -46,6 +72,10 @@ void FVaporExtension::PrePostProcessPass_RenderThread(FRDGBuilder& GraphBuilder,
 
 	/* Allocate and fill-in the shader pass parameters */
 	FCustomShader::FParameters* PassParameters = GraphBuilder.AllocParameters<FCustomShader::FParameters>();
+	{
+		FScopeLock Lock(&RenderDataLock);
+		PassParameters->Position = RenderData.Position;
+	}
 	PassParameters->View = SceneView.ViewUniformBuffer;
 	PassParameters->OriginalSceneColor = SceneColor.Texture;
 	PassParameters->SceneColorViewport = GetScreenPassTextureViewportParameters(SceneColorViewport);

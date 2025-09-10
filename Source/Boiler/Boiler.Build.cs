@@ -15,6 +15,19 @@ public class Boiler : ModuleRules
             "Projects"
             });
 
+        // Editor dependencies
+        if (Target.bBuildEditor)
+        {
+            PrivateDependencyModuleNames.AddRange(
+                new string[]
+                {
+                    "MainFrame",
+                    "EditorFramework",
+                    "UnrealEd"
+                }
+            );
+        }
+
         // Specific to OpenVDB support
         if (Target.IsInPlatformGroup(UnrealPlatformGroup.Windows))
         {
@@ -49,13 +62,5 @@ public class Boiler : ModuleRules
         {
             PublicDefinitions.Add("OPENVDB_AVAILABLE=0");
         }
-
-        // Private dependencies
-        // PrivateDependencyModuleNames.AddRange(
-        // new string[]
-        // {
-	    //	"SparseVolumeTexture",	// For the legacy OpenVDB importer reference, that actually uses the OpenVDB SDK
-		// }
-        // );
     }
 }

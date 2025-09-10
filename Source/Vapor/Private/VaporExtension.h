@@ -1,8 +1,3 @@
-// Custom SceneViewExtension Template for Unreal Engine
-// Copyright 2023 - 2025 Ossi Luoto
-// 
-// Custom SceneViewExtension implementation
-
 #pragma once
 
 #include "CoreMinimal.h"
@@ -10,22 +5,27 @@
 #include "SceneViewExtension.h"
 #include "PostProcess/PostProcessMaterial.h"
 #include "DataDrivenShaderPlatformInfo.h"
+#include "SceneRendererInterface.h"
 
 class FVaporExtension : public FSceneViewExtensionBase {
+	/* Cloudscape render data. */
+	struct FCloudscapeRenderData {
+		FVector3f Position;
+	};
+
+	// TArray<FCloudscapeRenderData> RenderData;
+	FCloudscapeRenderData RenderData;
+	FCriticalSection RenderDataLock;
+
 public:
 	FVaporExtension(const FAutoRegister& AutoRegister);
 
-public:
 	virtual void SetupViewFamily(FSceneViewFamily& InViewFamily) override {};
 	virtual void SetupView(FSceneViewFamily& InViewFamily, FSceneView& InView) override {};
-	virtual void BeginRenderViewFamily(FSceneViewFamily& InViewFamily) override {};
 
-	// See SceneViewExtension.h for hooks to different stages of rendering
-	// f.ex. PrePostProcessPass_RenderThread happens just when rendering is finished but PostProcessing hasn't started yet
+	virtual void BeginRenderViewFamily(FSceneViewFamily& InViewFamily) override;
 
-	// This is the method to hook into PostProcessing pass
-	// virtual void SubscribeToPostProcessingPass(EPostProcessingPass PassId, const FSceneView& View, FAfterPassCallbackDelegateArray& InOutPassCallbacks, bool bIsPassEnabled);
-
+	//virtual void PreRenderViewFamily_RenderThread(FRDGBuilder& GraphBuilder, FSceneViewFamily& ViewFamily);
 	virtual void PrePostProcessPass_RenderThread(FRDGBuilder& GraphBuilder, const FSceneView& InView, const FPostProcessingInputs& Inputs);
 
 	// This is our actual processing function
@@ -41,6 +41,7 @@ public:
 	SHADER_USE_PARAMETER_STRUCT(FCustomShader, FGlobalShader)
 
 	BEGIN_SHADER_PARAMETER_STRUCT(FParameters, )
+		SHADER_PARAMETER(FVector3f, Position)
 		SHADER_PARAMETER_STRUCT_REF(FViewUniformShaderParameters, View)
 		SHADER_PARAMETER_STRUCT(FScreenPassTextureViewportParameters, SceneColorViewport)
 		SHADER_PARAMETER_RDG_TEXTURE(Texture2D, OriginalSceneColor)

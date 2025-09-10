@@ -27,6 +27,8 @@ float2 Sphere(float3 ro, float3 rd, float3 ce, float ra) {
     return float2(-b - h, -b + h);
 }
 
+float3 Position;
+
 // SceneColor texture
 Texture2D OriginalSceneColor;
 
@@ -51,10 +53,10 @@ void MainCS(uint2 DispatchThreadId : SV_DispatchThreadID)
     
     const float3 ro = View.WorldViewOriginHigh;
     const float3 rd = normalize(GetTranslatedWorldPositionFromScreenUV(uv, 1.0));
-    const float2 t = Sphere(ro, rd, float3(0.0, 0.0, 100.0), 100.0);
+    const float2 t = Sphere(ro, rd, Position, 100.0);
     
     if (t.x > 0.0) {
-        const float3 normal = normalize((ro + rd * t.x) - float3(0.0, 0.0, 100.0));
+        const float3 normal = normalize((ro + rd * t.x) - Position);
         Output[SceneColorViewport_ViewportMin + DispatchThreadId] = float4(normal * 0.5 + 0.5, 1.0);
     } else {
         Output[SceneColorViewport_ViewportMin + DispatchThreadId] = OriginalSceneColor.SampleLevel(GlobalPointClampedSampler, uv, 0);
