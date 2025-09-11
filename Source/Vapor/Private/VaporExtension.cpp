@@ -3,6 +3,7 @@
 #include "EngineUtils.h"
 #include "PostProcess/PostProcessInputs.h"
 #include "VaporComponent.h"
+#include "Misc/Optional.h"
 
 IMPLEMENT_GLOBAL_SHADER(FCustomShader, "/Plugins/Vapor/PostProcessCS.usf", "MainCS", SF_Compute);
 
@@ -16,6 +17,14 @@ namespace {
 		ECVF_RenderThreadSafe);
 }
 
+enum ERenderTarget {
+	ESceneColor  = 0, /* [0] "SceneColor" */
+	EWorldNormal = 1, /* [1]  "GBufferA"  */
+	EMaterial    = 2, /* [2]  "GBufferB"  */
+	EAlbedo      = 3, /* [3]  "GBufferC"  */
+	ECustom      = 4, /* [4]  "GBufferD"  */
+};
+
 FVaporExtension::FVaporExtension(const FAutoRegister& AutoRegister) : FSceneViewExtensionBase(AutoRegister) {
 	UE_LOG(LogTemp, Log, TEXT("Vapor: Custom SceneViewExtension registered"));
 }
@@ -25,26 +34,17 @@ void FVaporExtension::BeginRenderViewFamily(FSceneViewFamily& ViewFamily) {
 	UWorld* World = ViewFamily.Scene->GetWorld();
 	if (World == nullptr) return;
 
-	//TArray<FCloudscapeRenderData> Reservoir;
-
-	/* Collect all the actors into the reservoir */
+	/* Find the first Vapor actor in the scene, use it */
 	for (TActorIterator<AVapor> It(World); It; ++It) {
-		//AVapor* MyActor = *It;
-		//if (MyActor == nullptr) continue;
-
 		FCloudscapeRenderData Data {};
 		Data.Position = (FVector3f)It->GetActorLocation();
 		FScopeLock Lock(&RenderDataLock);
 		RenderData = MoveTemp(Data);
-		//Reservoir.Add(Data);
+		break;
 	}
-
-	/* Copy the reservoir using a thread-safe lock */
-	//FScopeLock Lock(&RenderDataLock);
-	//RenderData = MoveTemp(Reservoir);
 }
 
-void FVaporExtension::PrePostProcessPass_RenderThread(FRDGBuilder& GraphBuilder, const FSceneView& SceneView, const FPostProcessingInputs& Inputs) {
+void FVaporExtension::PostRenderBasePassDeferred_RenderThread(FRDGBuilder& GraphBuilder, FSceneView& SceneView, const FRenderTargetBindingSlots& RenderTargets, TRDGUniformBufferRef<FSceneTextureUniformParameters> SceneTextures) {
 	/* Check if our extension is toggled ON */
 	if (CVarShaderOn.GetValueOnRenderThread() == 0) return;
 	
@@ -55,7 +55,7 @@ void FVaporExtension::PrePostProcessPass_RenderThread(FRDGBuilder& GraphBuilder,
 	FGlobalShaderMap* GlobalShaderMap = GetGlobalShaderMap(SceneView.Family->GetFeatureLevel());
 
 	/* Convert the scene color texture to a screen pass texture */
-	const FScreenPassTexture SceneColor = FScreenPassTexture(Inputs.SceneTextures->GetContents()->SceneColorTexture);
+	const FScreenPassTexture SceneColor = FScreenPassTexture(RenderTargets.Output[EWorldNormal].GetTexture());
 	const FScreenPassTextureViewport SceneColorViewport(SceneColor);
 	
 	/* Target texture creation info */

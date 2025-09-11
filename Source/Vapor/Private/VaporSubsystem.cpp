@@ -1,6 +1,7 @@
 #include "VaporSubsystem.h"
 #include "VaporExtension.h"
 #include "SceneViewExtension.h"
+#include "Misc/Optional.h"
 
 void UVaporSubsystem::Initialize(FSubsystemCollectionBase& Collection) {
 	VaporExtension = FSceneViewExtensions::NewExtension<FVaporExtension>();
