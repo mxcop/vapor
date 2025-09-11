@@ -14,69 +14,69 @@ float3 Cloud_Position;
 float3 Cloud_SunDir;
 
 // Scene Textures
-Texture2D<float4> SceneColor;
-Texture2D<float4> SceneDepth;
+Texture2D<float3> SceneColor;
+Texture2D<float> SceneDepth;
 
 // Output
 RWTexture2D<float4> Output;
 
 /// Get the UV coordinate for a given pixel.
-float2 GetUV(const uint2 pixel) { return (float2(pixel) + 0.5 - View.TemporalAAJitter.xy) * View.ViewSizeAndInvSize.zw; }
+float2 GetPixelUV(const uint2 Pixel) { return (float2(Pixel) + 0.5 - View.TemporalAAJitter.xy) * View.ViewSizeAndInvSize.zw; }
 
 /// Get the depth value for a given pixel along the given ray.
-float GetPixelDepth(const uint2 pixel, const float3 rd) { return ConvertFromDeviceZ(SceneDepth[pixel].r) / dot(rd, View.ViewForward); }
+float GetPixelDepth(const uint2 Pixel, const float3 RayDirection) { return ConvertFromDeviceZ(SceneDepth[Pixel]) / dot(RayDirection, View.ViewForward); }
 
 /// Get the ray origin of the current view.
 float3 GetRayOrigin() { return View.WorldViewOriginHigh + View.WorldViewOriginLow; }
 
 /// Get the ray direction of the current view for a given UV coordinate.
-float3 GetRayDirection(const float2 uv) {
-    const float2 screen = GetScreenPositionForProjectionType((uv - View.ScreenPositionScaleBias.wz) / View.ScreenPositionScaleBias.xy, 1.0);
-    return normalize(mul(float4(screen, 1.0, 1.0), View.ScreenToTranslatedWorld).xyz);
+float3 GetRayDirection(const float2 UV) {
+    const float2 ScreenPos = GetScreenPositionForProjectionType((UV - View.ScreenPositionScaleBias.wz) / View.ScreenPositionScaleBias.xy, 1.0);
+    return normalize(mul(float4(ScreenPos, 1.0, 1.0), View.ScreenToTranslatedWorld).xyz);
 }
 
 /// Intersect a sphere with a ray.
-float2 RayIntersectSphere(float3 ro, float3 rd, float3 ce, float ra) {
+float RayIntersectSphere(float3 ro, float3 rd, float3 ce, float ra) {
     float3 oc = ro - ce;
     float b = dot(oc, rd);
     float3 qc = oc - b * rd;
     float h = ra * ra - dot(qc, qc);
-    if (h < 0.0) return float2(-1.0, -1.0);
+    if (h < 0.0) return -1.0;
     h = sqrt(h);
-    return float2(-b - h, -b + h);
+    return -b - h;
 }
 
 // Compute Shader code
 [numthreads(THREADS_X, THREADS_Y, THREADS_Z)]
 void MainCS(uint2 DispatchThreadId : SV_DispatchThreadID) {
     // Calculate the pixel coordinate of this thread.
-    const uint2 pixel = View.ViewRectMinAndSize.xy + DispatchThreadId;
+    const uint2 Pixel = View.ViewRectMinAndSize.xy + DispatchThreadId;
     
 	// Make sure this pixel isn't outside the viewport bounds.
-    if (any(pixel >= View.ViewRectMinAndSize.zw)) return;
+    if (any(Pixel >= View.ViewRectMinAndSize.zw)) return;
 	
     // Calculate the UV coordinate of the current pixel.
-    const float2 uv = GetUV(pixel);
+    const float2 UV = GetPixelUV(Pixel);
     
     // Get the ray origin & direction.
-    const float3 ro = GetRayOrigin();
-    const float3 rd = GetRayDirection(uv);
+    const float3 RayOrigin = GetRayOrigin();
+    const float3 RayDirection = GetRayDirection(UV);
     
     // Ray vs Sphere intersection test.
-    const float2 t = RayIntersectSphere(ro, rd, Cloud_Position, 100.0);
+    const float IntersectionT = RayIntersectSphere(RayOrigin, RayDirection, Cloud_Position, 100.0);
     
     // Fetch the color and depth of the pixel.
-    const float3 color = SceneColor[pixel].rgb;
-    const float depth = GetPixelDepth(pixel, rd);
+    const float3 PixelColor = SceneColor[Pixel];
+    const float PixelDepth = GetPixelDepth(Pixel, RayDirection);
     
     // Miss
-    if (t.y < 0.0 || t.x >= depth) {
-        Output[pixel] = float4(color, 1.0);
+    if (IntersectionT < 0.0 || IntersectionT >= PixelDepth) {
+        Output[Pixel] = float4(PixelColor, 1.0);
         return;
     }
     
     // Hit
-    const float3 normal = normalize((ro + rd * t.x) - Cloud_Position);
-    const float ndotl = max(1e-3, dot(normal, Cloud_SunDir));
-    Output[pixel] = float4(ndotl.xxx, 1.0);
+    const float3 HitNormal = normalize((RayOrigin + RayDirection * IntersectionT) - Cloud_Position);
+    const float NdotL = max(1e-3, dot(HitNormal, Cloud_SunDir));
+    Output[Pixel] = float4(NdotL.xxx, 1.0);
 }
