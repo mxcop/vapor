@@ -1,5 +1,7 @@
 #include "VaporExtension.h"
 
+#include "Engine/DirectionalLight.h"
+#include "Components/DirectionalLightComponent.h"
 #include "EngineUtils.h"
 #include "PostProcess/PostProcessInputs.h"
 #include "VaporComponent.h"
@@ -34,17 +36,21 @@ void FVaporExtension::BeginRenderViewFamily(FSceneViewFamily& ViewFamily) {
 	UWorld* World = ViewFamily.Scene->GetWorld();
 	if (World == nullptr) return;
 
-	/* Find the first Vapor actor in the scene, use it */
-	for (TActorIterator<AVapor> It(World); It; ++It) {
-		FCloudscapeRenderData Data {};
-		Data.Position = (FVector3f)It->GetActorLocation();
-		FScopeLock Lock(&RenderDataLock);
-		RenderData = MoveTemp(Data);
-		break;
-	}
+	/* Fetch actors from the scene */
+	TActorIterator<AVapor> VaporInstance(World);
+	TActorIterator<ADirectionalLight> SunInstance(World);
+	if (!VaporInstance || !SunInstance) return;
+
+	/* Fill in the render data struct */
+	FCloudscapeRenderData Data {};
+	Data.Position = (FVector3f)VaporInstance->GetActorLocation();
+	Data.SunDir = -(FVector3f)SunInstance->GetComponent()->GetDirection();
+
+	FScopeLock Lock(&RenderDataLock);
+	RenderData = MoveTemp(Data);
 }
 
-void FVaporExtension::PostRenderBasePassDeferred_RenderThread(FRDGBuilder& GraphBuilder, FSceneView& SceneView, const FRenderTargetBindingSlots& RenderTargets, TRDGUniformBufferRef<FSceneTextureUniformParameters> SceneTextures) {
+void FVaporExtension::PrePostProcessPass_RenderThread(FRDGBuilder& GraphBuilder, const FSceneView& InView, const FPostProcessingInputs& Inputs) {
 	/* Check if our extension is toggled ON */
 	if (CVarShaderOn.GetValueOnRenderThread() == 0) return;
 	
@@ -52,10 +58,11 @@ void FVaporExtension::PostRenderBasePassDeferred_RenderThread(FRDGBuilder& Graph
 	RDG_EVENT_SCOPE(GraphBuilder, "Vapor Render Pass");
 
 	/* Get the global shader map from our scene view */
-	FGlobalShaderMap* GlobalShaderMap = GetGlobalShaderMap(SceneView.Family->GetFeatureLevel());
+	FGlobalShaderMap* GlobalShaderMap = GetGlobalShaderMap(InView.Family->GetFeatureLevel());
 
 	/* Convert the scene color texture to a screen pass texture */
-	const FScreenPassTexture SceneColor = FScreenPassTexture(RenderTargets.Output[EWorldNormal].GetTexture());
+	const FScreenPassTexture SceneColor = FScreenPassTexture(Inputs.SceneTextures->GetContents()->SceneColorTexture);
+	const FScreenPassTexture SceneDepth = FScreenPassTexture(Inputs.SceneTextures->GetContents()->SceneDepthTexture);
 	const FScreenPassTextureViewport SceneColorViewport(SceneColor);
 	
 	/* Target texture creation info */
@@ -74,10 +81,11 @@ void FVaporExtension::PostRenderBasePassDeferred_RenderThread(FRDGBuilder& Graph
 	FCustomShader::FParameters* PassParameters = GraphBuilder.AllocParameters<FCustomShader::FParameters>();
 	{
 		FScopeLock Lock(&RenderDataLock);
-		PassParameters->Position = RenderData.Position;
+		PassParameters->Cloud = RenderData;
 	}
-	PassParameters->View = SceneView.ViewUniformBuffer;
-	PassParameters->OriginalSceneColor = SceneColor.Texture;
+	PassParameters->View = InView.ViewUniformBuffer;
+	PassParameters->SceneColor = SceneColor.Texture;
+	PassParameters->SceneDepth = SceneDepth.Texture;
 	PassParameters->SceneColorViewport = GetScreenPassTextureViewportParameters(SceneColorViewport);
 	PassParameters->Output = GraphBuilder.CreateUAV(FRDGTextureUAVDesc(OutputTexture));
 
