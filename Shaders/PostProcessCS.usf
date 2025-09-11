@@ -9,11 +9,22 @@
 #include "/Engine/Private/SceneTexturesCommon.ush"
 #include "/Engine/Private/DeferredShadingCommon.ush"
 
+// Cloud Parameters
+float3 Cloud_Position;
+float3 Cloud_SunDir;
+
+// Scene Textures
+Texture2D<float4> SceneColor;
+Texture2D<float4> SceneDepth;
+
+// Output
+RWTexture2D<float4> Output;
+
 /// Get the UV coordinate for a given pixel.
-float2 GetUV(const uint2 pixel) {
-    const float2 uv = (float2(pixel) + 0.5) * View.ViewSizeAndInvSize.zw;
-    return uv - View.TemporalAAJitter.xy * View.ViewSizeAndInvSize.zw;
-}
+float2 GetUV(const uint2 pixel) { return (float2(pixel) + 0.5 - View.TemporalAAJitter.xy) * View.ViewSizeAndInvSize.zw; }
+
+/// Get the depth value for a given pixel along the given ray.
+float GetPixelDepth(const uint2 pixel, const float3 rd) { return ConvertFromDeviceZ(SceneDepth[pixel].r) / dot(rd, View.ViewForward); }
 
 /// Get the ray origin of the current view.
 float3 GetRayOrigin() { return View.WorldViewOriginHigh + View.WorldViewOriginLow; }
@@ -24,7 +35,8 @@ float3 GetRayDirection(const float2 uv) {
     return normalize(mul(float4(screen, 1.0, 1.0), View.ScreenToTranslatedWorld).xyz);
 }
 
-float2 Sphere(float3 ro, float3 rd, float3 ce, float ra) {
+/// Intersect a sphere with a ray.
+float2 RayIntersectSphere(float3 ro, float3 rd, float3 ce, float ra) {
     float3 oc = ro - ce;
     float b = dot(oc, rd);
     float3 qc = oc - b * rd;
@@ -34,28 +46,16 @@ float2 Sphere(float3 ro, float3 rd, float3 ce, float ra) {
     return float2(-b - h, -b + h);
 }
 
-// Cloud Parameters
-float3 Cloud_Position;
-float3 Cloud_SunDir;
-
-// SceneColor texture
-Texture2D<float4> SceneColor;
-Texture2D<float> SceneDepth;
-
-// SceneColor Viewport parameters
-SCREEN_PASS_TEXTURE_VIEWPORT(SceneColorViewport)
-
-// Output
-RWTexture2D<float4> Output;
-
 // Compute Shader code
 [numthreads(THREADS_X, THREADS_Y, THREADS_Z)]
 void MainCS(uint2 DispatchThreadId : SV_DispatchThreadID) {
-	// Make sure this thread isn't outside the viewport bounds.
-    if (any(DispatchThreadId >= SceneColorViewport_ViewportMax)) return;
+    // Calculate the pixel coordinate of this thread.
+    const uint2 pixel = View.ViewRectMinAndSize.xy + DispatchThreadId;
+    
+	// Make sure this pixel isn't outside the viewport bounds.
+    if (any(pixel >= View.ViewRectMinAndSize.zw)) return;
 	
     // Calculate the UV coordinate of the current pixel.
-    const uint2 pixel = View.ViewRectMinAndSize.xy + DispatchThreadId;
     const float2 uv = GetUV(pixel);
     
     // Get the ray origin & direction.
@@ -63,17 +63,20 @@ void MainCS(uint2 DispatchThreadId : SV_DispatchThreadID) {
     const float3 rd = GetRayDirection(uv);
     
     // Ray vs Sphere intersection test.
-    const float2 t = Sphere(ro, rd, Cloud_Position, 100.0);
+    const float2 t = RayIntersectSphere(ro, rd, Cloud_Position, 100.0);
     
     // Fetch the color and depth of the pixel.
-    const float3 color = SceneColor.SampleLevel(GlobalPointClampedSampler, uv, 0).rgb;
-    const float depth = ConvertFromDeviceZ(SceneDepth.SampleLevel(GlobalPointClampedSampler, uv, 0).r);
+    const float3 color = SceneColor[pixel].rgb;
+    const float depth = GetPixelDepth(pixel, rd);
     
-    if (t.x > 0.0 && t.x < depth) {
-        const float3 normal = normalize((ro + rd * t.x) - Cloud_Position);
-        const float ndotl = max(1e-3, dot(normal, Cloud_SunDir));
-        Output[pixel] = float4(ndotl.xxx, 1.0);
-    } else {
+    // Miss
+    if (t.y < 0.0 || t.x >= depth) {
         Output[pixel] = float4(color, 1.0);
+        return;
     }
+    
+    // Hit
+    const float3 normal = normalize((ro + rd * t.x) - Cloud_Position);
+    const float ndotl = max(1e-3, dot(normal, Cloud_SunDir));
+    Output[pixel] = float4(ndotl.xxx, 1.0);
 }

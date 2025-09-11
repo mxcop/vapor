@@ -61,13 +61,13 @@ void FVaporExtension::PrePostProcessPass_RenderThread(FRDGBuilder& GraphBuilder,
 	FGlobalShaderMap* GlobalShaderMap = GetGlobalShaderMap(InView.Family->GetFeatureLevel());
 
 	/* Convert the scene color texture to a screen pass texture */
-	const FScreenPassTexture SceneColor = FScreenPassTexture(Inputs.SceneTextures->GetContents()->SceneColorTexture);
-	const FScreenPassTexture SceneDepth = FScreenPassTexture(Inputs.SceneTextures->GetContents()->SceneDepthTexture);
-	const FScreenPassTextureViewport SceneColorViewport(SceneColor);
+	FRDGTexture* SceneColor = Inputs.SceneTextures->GetContents()->SceneColorTexture;
+	FRDGTexture* SceneDepth = Inputs.SceneTextures->GetContents()->SceneDepthTexture;
+	const FIntPoint ViewSize = SceneColor->Desc.Extent;
 	
 	/* Target texture creation info */
 	FRDGTextureDesc OutputDesc {};
-	OutputDesc = SceneColor.Texture->Desc;
+	OutputDesc = SceneColor->Desc;
 	OutputDesc.Reset();
 	OutputDesc.Flags |= TexCreate_UAV;
 	OutputDesc.Flags &= ~(TexCreate_RenderTargetable | TexCreate_FastVRAM);
@@ -84,13 +84,11 @@ void FVaporExtension::PrePostProcessPass_RenderThread(FRDGBuilder& GraphBuilder,
 		PassParameters->Cloud = RenderData;
 	}
 	PassParameters->View = InView.ViewUniformBuffer;
-	PassParameters->SceneColor = SceneColor.Texture;
-	PassParameters->SceneDepth = SceneDepth.Texture;
-	PassParameters->SceneColorViewport = GetScreenPassTextureViewportParameters(SceneColorViewport);
+	PassParameters->SceneColor = SceneColor;
+	PassParameters->SceneDepth = SceneDepth;
 	PassParameters->Output = GraphBuilder.CreateUAV(FRDGTextureUAVDesc(OutputTexture));
 
 	/* Calculate the group count based on the viewport size */
-	const FIntPoint ViewSize = SceneColor.ViewRect.Size();
 	const FIntVector DispatchCount = FComputeShaderUtils::GetGroupCount(ViewSize, FComputeShaderUtils::kGolden2DGroupSize);
 
 	/* Load our custom shader from the global shader map */
@@ -101,5 +99,5 @@ void FVaporExtension::PrePostProcessPass_RenderThread(FRDGBuilder& GraphBuilder,
 		ComputeShader, PassParameters, DispatchCount);
 
 	/* Finally copy our output texture back onto the scene color texture */
-	AddCopyTexturePass(GraphBuilder, OutputTexture, SceneColor.Texture);
+	AddCopyTexturePass(GraphBuilder, OutputTexture, SceneColor);
 }
