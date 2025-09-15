@@ -5,13 +5,15 @@ float3 Cloud_Position;
 float3 Cloud_SunDir;
 
 // Ray Marching Parameters
-static const float BASE_STEP_SIZE = 0.01;
-static const float STEP_SIZE_MULT = 1.1;
-static const uint MAX_STEP_COUNT = 64;
+static const float BASE_STEP_SIZE = 0.001; // cm
+static const float STEP_SIZE_MULT = 1.0;
+static const uint MAX_STEP_COUNT = 256;
 
 // Volume Parameters
-static const float SPHERE_SIZE = 100.0;
-static const float VOLUME_DENSITY = 0.005;
+static const float SPHERE_SIZE = 100.0; // cm
+static const float VOLUME_DENSITY = 0.05;
+static const float3 VOLUME_ABSORPTION = float3(1.1, 1.0, 0.9);
+static const float3 SUN_LUMINANCE = float3(1.2, 1.0, 0.8);
 
 // Scene Textures
 Texture2D<float3> SceneColor;
@@ -20,42 +22,61 @@ Texture2D<float> SceneDepth;
 // Output Texture
 RWTexture2D<float4> Output;
 
-/// If the return value is positive, it indicates the signed distance to the volume.
-/// If the return value is negative, it indicates the denstiy of the volume.
-float SampleVolume(const float3 Point) {
+/// Returns the signed distance in the X component, and the density in the Y component.
+float2 SampleVolume(const float3 Point) {
     // Calculate the signed distance to the volume.
     const float UDist = distance(Cloud_Position, Point);
     const float SDist = UDist - SPHERE_SIZE;
-
-    // Return the signed distance if we're outside the volume.
-    if (SDist > 0.05) return SDist;
-
-    // If we're inside the volume, return the density of the volume as a negative number.
-    return -VOLUME_DENSITY; // Homogeneous for now.
+    return float2(SDist, VOLUME_DENSITY); // Homogeneous for now.
 }
 
-/// Ray march the scene.
-float RayMarch(const float3 Origin, const float3 Dir) {
+/// Trace the scene, find out how much light is being absorped.
+float3 TraceAbsorption(const float3 Origin, const float3 Dir) {
     // Traversal variables.
-    float StepSize = BASE_STEP_SIZE;
     float Distance = 0.0;
-    float Absorbtion = 0.0;
+    float Material = 0.0;
     
     for (uint s = 0; s < MAX_STEP_COUNT; ++s) {
+        // Sample the volume.
         const float3 SamplePos = Origin + Dir * Distance;
-        const float Sample = SampleVolume(SamplePos);
-
-        // We're outside the volume, step forward by signed distance.
-        if (Sample > 0.0) { Distance += Sample; continue; }
-
-        // We're inside the volume, apply absorbtion and step forward.
-        Absorbtion -= Sample * exp(StepSize);
-        if (Absorbtion >= 1.0) break;
+        const float2 Sample = SampleVolume(SamplePos);
+        const float StepSize = max(0.1, abs(Sample.x));
+        
+        // We're inside the volume, accumulate absorption.
+        if (Sample.x < 0.1) Material += Sample.y * StepSize;
+        
+        // Step forward.
         Distance += StepSize;
-        StepSize *= STEP_SIZE_MULT;
     }
     
-    return saturate(Absorbtion);
+    const float3 Absorption = exp(-VOLUME_ABSORPTION * Material);
+    return Absorption;
+}
+
+float3 TraceVolume(const float3 ViewColor, const float3 Origin, const float3 Dir) {
+    // Traversal variables.
+    float Distance = 0.0;
+    float Material = 0.0;
+    float3 Luminance = float3(0.0, 0.0, 0.0);
+    
+    for (uint s = 0; s < MAX_STEP_COUNT; ++s) {
+        // Sample the volume.
+        const float3 SamplePos = Origin + Dir * Distance;
+        const float2 Sample = SampleVolume(SamplePos);
+        const float StepSize = max(0.1, abs(Sample.x));
+        
+        // We're inside the volume, accumulate absorption.
+        if (Sample.x < 0.1) {
+            Material += Sample.y * StepSize;
+            Luminance += exp(-VOLUME_ABSORPTION * Material) * SUN_LUMINANCE * TraceAbsorption(SamplePos, Cloud_SunDir) * StepSize;
+        }
+        
+        // Step forward.
+        Distance += StepSize;
+    }
+    
+    const float3 Absorption = exp(-VOLUME_ABSORPTION * Material);
+    return ViewColor * Absorption + ((Material > 0.0) ? Luminance / Material : Luminance);
 }
 
 // Compute Shader code
@@ -75,11 +96,11 @@ void MainCS(uint2 DispatchThreadId : SV_DispatchThreadID) {
     const float3 RayDirection = GetRayDirection(UV);
     
     // Ray vs Sphere intersection test.
-    const float Absorbtion = RayMarch(RayOrigin, RayDirection);
+    const float3 FinalColor = TraceVolume(SceneColor[Pixel], RayOrigin, RayDirection);
     
     // Fetch the color and depth of the pixel.
-    const float3 PixelColor = SceneColor[Pixel];
-    const float3 FinalColor = lerp(PixelColor, float3(1.0, 1.0, 1.0), Absorbtion);
+    // const float3 PixelColor = SceneColor[Pixel];
+    // const float3 FinalColor = PixelColor * Absorption; // lerp(PixelColor, float3(1.0, 1.0, 1.0), Absorbtion);
     
     Output[Pixel] = float4(FinalColor, 1.0);
 }
