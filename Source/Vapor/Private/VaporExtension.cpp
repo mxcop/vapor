@@ -7,7 +7,7 @@
 #include "VaporComponent.h"
 #include "Misc/Optional.h"
 
-IMPLEMENT_GLOBAL_SHADER(FCustomShader, "/Plugins/Vapor/PostProcessCS.usf", "MainCS", SF_Compute);
+IMPLEMENT_GLOBAL_SHADER(FCustomShader, "/Plugins/Vapor/SphereVolumeCS.usf", "MainCS", SF_Compute);
 
 namespace {
 	TAutoConsoleVariable<int32> CVarShaderOn(

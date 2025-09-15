@@ -1,0 +1,17 @@
+#include "/Engine/Public/Platform.ush"
+#include "/Engine/Private/Common.ush"
+
+/// Get the UV coordinate for a given pixel.
+float2 GetPixelUV(const uint2 Pixel) { return (float2(Pixel) + 0.5 - View.TemporalAAJitter.xy) * View.ViewSizeAndInvSize.zw; }
+
+/// Get the depth value for a given pixel along the given ray.
+float TransformPixelDepth(const float DeviceZ, const float3 RayDirection) { return ConvertFromDeviceZ(DeviceZ) / dot(RayDirection, View.ViewForward); }
+
+/// Get the ray origin of the current view.
+float3 GetRayOrigin() { return View.WorldViewOriginHigh + View.WorldViewOriginLow; }
+
+/// Get the ray direction of the current view for a given UV coordinate.
+float3 GetRayDirection(const float2 UV) {
+    const float2 ScreenPos = GetScreenPositionForProjectionType((UV - View.ScreenPositionScaleBias.wz) / View.ScreenPositionScaleBias.xy, 1.0);
+    return normalize(mul(float4(ScreenPos, 1.0, 1.0), View.ScreenToTranslatedWorld).xyz);
+}

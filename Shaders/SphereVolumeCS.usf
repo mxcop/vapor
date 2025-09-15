@@ -1,0 +1,85 @@
+#include "Common.ush"
+
+// Cloud Parameters
+float3 Cloud_Position;
+float3 Cloud_SunDir;
+
+// Ray Marching Parameters
+static const float BASE_STEP_SIZE = 0.01;
+static const float STEP_SIZE_MULT = 1.1;
+static const uint MAX_STEP_COUNT = 64;
+
+// Volume Parameters
+static const float SPHERE_SIZE = 100.0;
+static const float VOLUME_DENSITY = 0.005;
+
+// Scene Textures
+Texture2D<float3> SceneColor;
+Texture2D<float> SceneDepth;
+
+// Output Texture
+RWTexture2D<float4> Output;
+
+/// If the return value is positive, it indicates the signed distance to the volume.
+/// If the return value is negative, it indicates the denstiy of the volume.
+float SampleVolume(const float3 Point) {
+    // Calculate the signed distance to the volume.
+    const float UDist = distance(Cloud_Position, Point);
+    const float SDist = UDist - SPHERE_SIZE;
+
+    // Return the signed distance if we're outside the volume.
+    if (SDist > 0.05) return SDist;
+
+    // If we're inside the volume, return the density of the volume as a negative number.
+    return -VOLUME_DENSITY; // Homogeneous for now.
+}
+
+/// Ray march the scene.
+float RayMarch(const float3 Origin, const float3 Dir) {
+    // Traversal variables.
+    float StepSize = BASE_STEP_SIZE;
+    float Distance = 0.0;
+    float Absorbtion = 0.0;
+    
+    for (uint s = 0; s < MAX_STEP_COUNT; ++s) {
+        const float3 SamplePos = Origin + Dir * Distance;
+        const float Sample = SampleVolume(SamplePos);
+
+        // We're outside the volume, step forward by signed distance.
+        if (Sample > 0.0) { Distance += Sample; continue; }
+
+        // We're inside the volume, apply absorbtion and step forward.
+        Absorbtion -= Sample * exp(StepSize);
+        if (Absorbtion >= 1.0) break;
+        Distance += StepSize;
+        StepSize *= STEP_SIZE_MULT;
+    }
+    
+    return saturate(Absorbtion);
+}
+
+// Compute Shader code
+[numthreads(THREADS_X, THREADS_Y, THREADS_Z)]
+void MainCS(uint2 DispatchThreadId : SV_DispatchThreadID) {
+    // Calculate the pixel coordinate of this thread.
+    const uint2 Pixel = View.ViewRectMinAndSize.xy + DispatchThreadId;
+    
+	// Make sure this pixel isn't outside the viewport bounds.
+    if (any(Pixel >= View.ViewRectMinAndSize.zw)) return;
+	
+    // Calculate the UV coordinate of the current pixel.
+    const float2 UV = GetPixelUV(Pixel);
+    
+    // Get the ray origin & direction.
+    const float3 RayOrigin = GetRayOrigin();
+    const float3 RayDirection = GetRayDirection(UV);
+    
+    // Ray vs Sphere intersection test.
+    const float Absorbtion = RayMarch(RayOrigin, RayDirection);
+    
+    // Fetch the color and depth of the pixel.
+    const float3 PixelColor = SceneColor[Pixel];
+    const float3 FinalColor = lerp(PixelColor, float3(1.0, 1.0, 1.0), Absorbtion);
+    
+    Output[Pixel] = float4(FinalColor, 1.0);
+}
