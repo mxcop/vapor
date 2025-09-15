@@ -7,11 +7,11 @@ float3 Cloud_SunDir;
 // Ray Marching Parameters
 static const float BASE_STEP_SIZE = 0.001; // cm
 static const float STEP_SIZE_MULT = 1.0;
-static const uint MAX_STEP_COUNT = 256;
+static const uint MAX_STEP_COUNT = 128;
 
 // Volume Parameters
 static const float SPHERE_SIZE = 100.0; // cm
-static const float VOLUME_DENSITY = 0.05;
+static const float VOLUME_DENSITY = 0.025;
 static const float3 VOLUME_ABSORPTION = float3(1.1, 1.0, 0.9);
 static const float3 SUN_LUMINANCE = float3(1.2, 1.0, 0.8);
 
@@ -28,6 +28,16 @@ float2 SampleVolume(const float3 Point) {
     const float UDist = distance(Cloud_Position, Point);
     const float SDist = UDist - SPHERE_SIZE;
     return float2(SDist, VOLUME_DENSITY); // Homogeneous for now.
+}
+
+// Anisotropic scattering function for clouds.
+// Source: <https://www.guerrilla-games.com/read/nubis-cubed>
+float HenyeyGreenstein(float VdotL, float G) {
+    const float G2 = G * G;
+    const float num = 1.0 - G2;
+    const float denom = 1.0 + G2 - 2.0 * G * VdotL;
+    const float rsqrt_denom = rsqrt(denom);
+    return num * rsqrt_denom * rsqrt_denom * rsqrt_denom * (1.0 / (4.0 * 3.14));
 }
 
 /// Trace the scene, find out how much light is being absorped.
@@ -49,6 +59,7 @@ float3 TraceAbsorption(const float3 Origin, const float3 Dir) {
         Distance += StepSize;
     }
     
+    // Beer's Law <https://en.wikipedia.org/wiki/Beer%E2%80%93Lambert_law>
     const float3 Absorption = exp(-VOLUME_ABSORPTION * Material);
     return Absorption;
 }
@@ -59,6 +70,8 @@ float3 TraceVolume(const float3 ViewColor, const float3 Origin, const float3 Dir
     float Material = 0.0;
     float3 Luminance = float3(0.0, 0.0, 0.0);
     
+    const float Scattering = HenyeyGreenstein(dot(Dir, Cloud_SunDir), 0.2);
+    
     for (uint s = 0; s < MAX_STEP_COUNT; ++s) {
         // Sample the volume.
         const float3 SamplePos = Origin + Dir * Distance;
@@ -68,13 +81,14 @@ float3 TraceVolume(const float3 ViewColor, const float3 Origin, const float3 Dir
         // We're inside the volume, accumulate absorption.
         if (Sample.x < 0.1) {
             Material += Sample.y * StepSize;
-            Luminance += exp(-VOLUME_ABSORPTION * Material) * SUN_LUMINANCE * TraceAbsorption(SamplePos, Cloud_SunDir) * StepSize;
+            Luminance += Scattering * exp(-VOLUME_ABSORPTION * Material) * SUN_LUMINANCE * TraceAbsorption(SamplePos, Cloud_SunDir) * StepSize;
         }
         
         // Step forward.
         Distance += StepSize;
     }
     
+    // Beer's Law <https://en.wikipedia.org/wiki/Beer%E2%80%93Lambert_law>
     const float3 Absorption = exp(-VOLUME_ABSORPTION * Material);
     return ViewColor * Absorption + ((Material > 0.0) ? Luminance / Material : Luminance);
 }
