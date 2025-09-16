@@ -2,12 +2,15 @@
 
 #include "Engine/DirectionalLight.h"
 #include "Components/DirectionalLightComponent.h"
+#include "Components/SkyAtmosphereComponent.h"
 #include "EngineUtils.h"
 #include "PostProcess/PostProcessInputs.h"
 #include "VaporComponent.h"
 #include "Misc/Optional.h"
 
 IMPLEMENT_GLOBAL_SHADER(FCustomShader, "/Plugins/Vapor/SphereVolumeCS.usf", "MainCS", SF_Compute);
+
+IMPLEMENT_UNIFORM_BUFFER_STRUCT(FCloudscapeRenderData, "Cloud");
 
 namespace {
 	TAutoConsoleVariable<int32> CVarShaderOn(
@@ -39,12 +42,19 @@ void FVaporExtension::BeginRenderViewFamily(FSceneViewFamily& ViewFamily) {
 	/* Fetch actors from the scene */
 	TActorIterator<AVapor> VaporInstance(World);
 	TActorIterator<ADirectionalLight> SunInstance(World);
+	TActorIterator<ASkyAtmosphere> SkyInstance(World);
 	if (!VaporInstance || !SunInstance) return;
 
 	/* Fill in the render data struct */
 	FCloudscapeRenderData Data {};
 	Data.Position = (FVector3f)VaporInstance->GetActorLocation();
 	Data.SunDir = -(FVector3f)SunInstance->GetComponent()->GetDirection();
+	Data.SunLuminance = (FVector3f)SunInstance->GetComponent()->GetColoredLightBrightness();
+	if (SkyInstance) Data.SunLuminance *= (FVector3f)SkyInstance->GetComponent()->GetAtmosphereTransmitanceOnGroundAtPlanetTop(SunInstance->GetComponent());
+	Data.Absorption = VaporInstance->GetComponent()->Absorption;
+	Data.Density = VaporInstance->GetComponent()->Density;
+	Data.MinStepSize = VaporInstance->GetComponent()->MinStepSize;
+	Data.Method = VaporInstance->GetComponent()->Method;
 
 	FScopeLock Lock(&RenderDataLock);
 	RenderData = MoveTemp(Data);
@@ -81,7 +91,7 @@ void FVaporExtension::PrePostProcessPass_RenderThread(FRDGBuilder& GraphBuilder,
 	FCustomShader::FParameters* PassParameters = GraphBuilder.AllocParameters<FCustomShader::FParameters>();
 	{
 		FScopeLock Lock(&RenderDataLock);
-		PassParameters->Cloud = RenderData;
+		PassParameters->Cloud = TUniformBufferRef<FCloudscapeRenderData>::CreateUniformBufferImmediate(RenderData, EUniformBufferUsage::UniformBuffer_SingleFrame);
 	}
 	PassParameters->View = InView.ViewUniformBuffer;
 	PassParameters->SceneColor = SceneColor;

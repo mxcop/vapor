@@ -7,13 +7,18 @@
 #include "DataDrivenShaderPlatformInfo.h"
 #include "SceneRendererInterface.h"
 
-class FVaporExtension : public FSceneViewExtensionBase {
-	/* Cloudscape render data. */
-	BEGIN_SHADER_PARAMETER_STRUCT(FCloudscapeRenderData, )
-		SHADER_PARAMETER(FVector3f, Position)
-		SHADER_PARAMETER(FVector3f, SunDir)
-	END_SHADER_PARAMETER_STRUCT()
+/* Cloudscape render data. */
+BEGIN_UNIFORM_BUFFER_STRUCT(FCloudscapeRenderData, )
+	SHADER_PARAMETER(FVector3f, Position)
+	SHADER_PARAMETER(FVector3f, Absorption)
+	SHADER_PARAMETER(float, Density)
+	SHADER_PARAMETER(FVector3f, SunDir)
+	SHADER_PARAMETER(FVector3f, SunLuminance)
+	SHADER_PARAMETER(float, MinStepSize)
+	SHADER_PARAMETER(int, Method)
+END_UNIFORM_BUFFER_STRUCT()
 
+class FVaporExtension : public FSceneViewExtensionBase {
 	FCloudscapeRenderData RenderData;
 	FCriticalSection RenderDataLock;
 
@@ -29,8 +34,6 @@ public:
 
 	/* All the rendering happens in here. */
 	virtual void PrePostProcessPass_RenderThread(FRDGBuilder& GraphBuilder, const FSceneView& InView, const FPostProcessingInputs& Inputs) override;
-
-	friend class FCustomShader;
 };
 
 // Custom Post Process Shader
@@ -41,7 +44,7 @@ public:
 	SHADER_USE_PARAMETER_STRUCT(FCustomShader, FGlobalShader)
 
 	BEGIN_SHADER_PARAMETER_STRUCT(FParameters, )
-		SHADER_PARAMETER_STRUCT(FVaporExtension::FCloudscapeRenderData, Cloud)
+		SHADER_PARAMETER_STRUCT_REF(FCloudscapeRenderData, Cloud)
 		SHADER_PARAMETER_STRUCT_REF(FViewUniformShaderParameters, View)
 		SHADER_PARAMETER_RDG_TEXTURE(Texture2D, SceneColor)
 		SHADER_PARAMETER_RDG_TEXTURE(Texture2D, SceneDepth)

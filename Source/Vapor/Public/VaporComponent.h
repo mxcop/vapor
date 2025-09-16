@@ -13,6 +13,18 @@ class UVaporComponent : public UPrimitiveComponent
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cloudscape")
 	TObjectPtr<class USparseVolumeTexture> SparseVolumeTexturePreview;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cloudscape")
+	FVector3f Absorption = FVector3f(1.2f, 1.0f, 0.9f);
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cloudscape")
+	float Density = 0.02f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cloudscape")
+	float MinStepSize = 0.1f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cloudscape")
+	int Method = 0;
 };
 
 /* Vapor Instance Actor */
@@ -28,4 +40,8 @@ private:
 #if WITH_EDITOR
 	virtual bool ActorTypeSupportsDataLayer() const override { return true; }
 #endif
+
+public:
+	/** Returns UVaporComponent subobject */
+	UVaporComponent* GetComponent() const { return VaporComponent; }
 };
