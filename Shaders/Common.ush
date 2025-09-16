@@ -12,6 +12,15 @@ float3 GetRayOrigin() { return View.WorldViewOriginHigh + View.WorldViewOriginLo
 
 /// Get the ray direction of the current view for a given UV coordinate.
 float3 GetRayDirection(const float2 UV) {
-    const float2 ScreenPos = GetScreenPositionForProjectionType((UV - View.ScreenPositionScaleBias.wz) / View.ScreenPositionScaleBias.xy, 1.0);
-    return normalize(mul(float4(ScreenPos, 1.0, 1.0), View.ScreenToTranslatedWorld).xyz);
+    // Reconstruct view space position on the far plane
+    float2 NDC = (UV - 0.5) * 2.0;
+    NDC.y = -NDC.y;
+    
+    // Unproject from clip space to view space
+    const float4 ClipPos = float4(NDC, 1.0f, 1.0f);
+    float4 ViewPos = mul(ClipPos, View.ClipToView);
+    ViewPos.xyz /= ViewPos.w;
+    
+    // Transform view space direction to world space
+    return normalize(mul(float4(ViewPos.xyz, 0.0f), View.ViewToTranslatedWorld).xyz);
 }
