@@ -1,0 +1,145 @@
+static const float WorleyTilesAt = 0.8;
+static const float AlligatorTilesAt = 1.0;
+
+#define UI0 1597334673U
+#define UI1 3812015801U
+#define UI3 uint3(UI0, UI1, 2798796415U)
+#define UIF (1.0 / float(0xffffffffU))
+
+float3 Hash33(const float3 p) {
+    uint3 q = uint3(int3(p)) * UI3;
+    q = (q.x ^ q.y ^ q.z) * UI3;
+    return float3(q) * UIF;
+}
+
+#define FPRIME 1317666547U
+#define VPRIME uint3(3480082861U, 2420690917U, 2149110343U)
+#define SMALLESTFLOAT (1.0 / float(0xffffffffU))
+float Hash13(const float3 p) {
+    const uint3 q = uint3(int3(p)) * VPRIME;
+    const uint n = (q.x & q.y ^ q.z) * FPRIME;
+    return float(n) * SMALLESTFLOAT;
+}
+
+/// Tileable 3D worley noise
+/// Source: <https://www.shadertoy.com/view/3dVXDc>
+float WorleyNoise(const float3 uv, const float freq) {
+    const float3 id = floor(uv);
+    const float3 p = fmod(uv, 1.0);
+    
+    float minDist = 10000.0;
+    for (float x = -1.0; x <= 1.0; ++x) {
+        for (float y = -1.0; y <= 1.0; ++y) {
+            for (float z = -1.0; z <= 1.0; ++z) {
+                const float3 offset = float3(x, y, z);
+                float3 h = (-1.0 + 2.0 * Hash33(fmod(id + offset, freq.xxx))) * 0.5 + 0.5;
+                h += offset;
+                const float3 d = p - h;
+                minDist = min(minDist, dot(d, d));
+            }
+        }
+    }
+    return 1.0 - minDist;
+}
+
+float WorleyFbm(const float3 p, const float freq) {
+    return WorleyNoise(p * freq, freq) * .625 +
+           WorleyNoise(p * freq * 2., freq * 2.) * .25 +
+           WorleyNoise(p * freq * 4., freq * 4.) * .125;
+}
+
+// Simplified Smoothstep https://www.desmos.com/calculator/un0o21eokv
+float SmoothValue(float x) {
+    x = clamp(x, 0.0, 1.0);
+    return x * x * (3.0 - 2.0 * x);
+}
+
+// Alligator Noise, originally from Side Effects:
+// https://www.sidefx.com/docs/hdk/alligator_2alligator_8_c-example.html
+float AlligatorNoise(float3 p, uint gridsize, uint3 seed) {
+    // scale the position
+    p *= float(gridsize);
+    
+    float3 id = floor(p); // Integer coordinates
+    float3 grid = p - id; // Fractional coordinates
+    
+    // Initialize results
+    float densest = 0.0;
+    float secondDensest = 0.0;
+    
+    // compare to 3x3x3 neighbor cells
+    for (int ix = -1; ix <= 1; ++ix) {
+        for (int iy = -1; iy <= 1; ++iy) {
+            for (int iz = -1; iz <= 1; ++iz) {
+                // Offset to the neighbor cell
+                float3 offset = float3(ix, iy, iz);
+            
+                // Current Cell coordinates
+                float3 cell = id + offset;
+                
+                // makes the noise repeat at pos 0-1
+                cell = fmod(cell, float(gridsize));
+                                
+                // Modify the result with some Offset
+                // This hash doesn't like 0 so plus 1
+                cell += float3(seed);
+                
+                // Get random center of the Cell
+                float3 center = Hash33(cell) + offset;
+                
+                // Distance from center
+                float dist = distance(grid, center);
+
+                // 'if(dist < 1.0)' doesn't have any effect and doesn't improve
+                // performance. See: https://www.shadertoy.com/view/MflGWM
+
+                // Get random density scaled by the distance to the random point          
+                float density = Hash13(cell) * SmoothValue(1.0 - dist);
+              
+                // find largest values
+                if (densest < density) {
+                    // move previous highest to second place
+                    secondDensest = densest;
+                    // update highest to current height
+                    densest = density;
+                } else if (secondDensest < density) {
+                    // update second highest to current height
+                    secondDensest = density;
+                }
+            }
+        }
+    }
+    // Subtract two largest density values for the result
+    return densest - secondDensest;
+}
+
+float AlligatorFbm(const float3 p, float gridsize, const int octaves, const float lacunarity, const float persistence) {
+    // Initialize the constants    
+    // For Amplitude math see: https://www.desmos.com/calculator/xgqeepapwn
+    float amplitude = 1.0;
+    float amplitudeSum = 0.0;
+    float result = 0.0;
+    uint3 seed = uint3(92364, 92364, 92364);
+    
+    for (int i = 0; i < octaves; ++i) {
+        // sample noise and apply amplitude
+        result += AlligatorNoise(p, uint(gridsize), seed) * amplitude;
+        
+        // add up amplitude to normalize result later
+        amplitudeSum += amplitude;
+        
+        // increase frequency for the next octave
+        gridsize *= lacunarity;
+        
+        // decrease amplitude for the next octave
+        amplitude *= persistence;
+        
+        // change seed/offset noise so it is unique for the next octave
+        seed += uint3(gridsize, gridsize, gridsize);
+    }
+    
+    // normalize the result to 0-1 range
+    result /= amplitudeSum;
+
+    return result;
+}

@@ -1,0 +1,11 @@
+#include "Common.ush"
+#include "Noise.ush"
+
+RWTexture3D<float> Output;
+static const uint OutputSize = 512;
+
+[numthreads(THREADS_X, THREADS_Y, THREADS_Z)]
+void MainCS(uint3 DispatchThreadId : SV_DispatchThreadID) {
+    const float3 UVW = (float3(DispatchThreadId) + 0.5) / OutputSize * 4.0;
+    Output[DispatchThreadId] = saturate(AlligatorFbm(UVW, 4.0, 5, 2.0, 0.5));
+}

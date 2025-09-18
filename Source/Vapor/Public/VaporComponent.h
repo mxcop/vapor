@@ -24,7 +24,13 @@ class UVaporComponent : public UPrimitiveComponent
 	float MinStepSize = 0.1f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cloudscape")
-	int Method = 0;
+	float InnerStepSize = 1.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cloudscape")
+	float StepSizeMult = 1.2f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cloudscape")
+	float ExtinctionThreshold = 0.001f;
 };
 
 /* Vapor Instance Actor */

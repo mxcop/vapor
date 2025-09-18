@@ -8,7 +8,8 @@
 #include "VaporComponent.h"
 #include "Misc/Optional.h"
 
-IMPLEMENT_GLOBAL_SHADER(FCustomShader, "/Plugins/Vapor/SphereVolumeCS.usf", "MainCS", SF_Compute);
+IMPLEMENT_GLOBAL_SHADER(FCloudShader, "/Plugins/Vapor/SphereVolumeCS.usf", "MainCS", SF_Compute);
+IMPLEMENT_GLOBAL_SHADER(FNoiseShader, "/Plugins/Vapor/NoiseGenCS.usf", "MainCS", SF_Compute);
 
 IMPLEMENT_UNIFORM_BUFFER_STRUCT(FCloudscapeRenderData, "Cloud");
 
@@ -54,7 +55,9 @@ void FVaporExtension::BeginRenderViewFamily(FSceneViewFamily& ViewFamily) {
 	Data.Absorption = VaporInstance->GetComponent()->Absorption;
 	Data.Density = VaporInstance->GetComponent()->Density;
 	Data.MinStepSize = VaporInstance->GetComponent()->MinStepSize;
-	Data.Method = VaporInstance->GetComponent()->Method;
+	Data.InnerStepSize = VaporInstance->GetComponent()->InnerStepSize;
+	Data.StepSizeMult = VaporInstance->GetComponent()->StepSizeMult;
+	Data.ExtinctionThreshold = VaporInstance->GetComponent()->ExtinctionThreshold;
 
 	FScopeLock Lock(&RenderDataLock);
 	RenderData = MoveTemp(Data);
@@ -63,12 +66,48 @@ void FVaporExtension::BeginRenderViewFamily(FSceneViewFamily& ViewFamily) {
 void FVaporExtension::PrePostProcessPass_RenderThread(FRDGBuilder& GraphBuilder, const FSceneView& InView, const FPostProcessingInputs& Inputs) {
 	/* Check if our extension is toggled ON */
 	if (CVarShaderOn.GetValueOnRenderThread() == 0) return;
-	
-	/* Start the render graph event scope */
-	RDG_EVENT_SCOPE(GraphBuilder, "Vapor Render Pass");
 
 	/* Get the global shader map from our scene view */
 	FGlobalShaderMap* GlobalShaderMap = GetGlobalShaderMap(InView.Family->GetFeatureLevel());
+
+	/* Create the worley noise texture if it hasn't been created yet */
+	const bool FirstTime = WorleyTexture.IsValid() == false;
+	if (FirstTime) {
+		// Create 3D texture description
+		FRHITextureCreateDesc Desc = FRHITextureCreateDesc::Create3D(TEXT("Worley Texture"))
+			.SetExtent(512, 512)
+			.SetDepth(512)
+			.SetFormat(PF_R8)
+			.SetFlags(ETextureCreateFlags::UAV | ETextureCreateFlags::ShaderResource)
+			.SetInitialState(ERHIAccess::UAVCompute);
+
+		// Create the texture
+		WorleyTexture = RHICreateTexture(Desc);
+	}
+
+	FRDGTextureRef NoiseTexture = GraphBuilder.RegisterExternalTexture(CreateRenderTarget(WorleyTexture, TEXT("Worley Texture")));
+
+	/* Fill in the worley noise texture if it hasn't been filled yet */
+	if (FirstTime) {
+		RDG_EVENT_SCOPE(GraphBuilder, "Vapor Noise Generation");
+
+		/* Allocate and fill-in the shader pass parameters */
+		FNoiseShader::FParameters* PassParameters = GraphBuilder.AllocParameters<FNoiseShader::FParameters>();
+		PassParameters->Output = GraphBuilder.CreateUAV(FRDGTextureUAVDesc(NoiseTexture));
+
+		/* Calculate the group count based on the viewport size */
+		const FIntVector DispatchCount = FIntVector(128, 128, 128); // FComputeShaderUtils::GetGroupCount(FIntVector(512, 512, 512), FComputeShaderUtils::kGolden2DGroupSize);
+
+		/* Load our custom shader from the global shader map */
+		TShaderMapRef<FNoiseShader> ComputeShader(GlobalShaderMap);
+
+		FComputeShaderUtils::AddPass(GraphBuilder,
+			RDG_EVENT_NAME("Worley Noise Generation Pass"),
+			ComputeShader, PassParameters, DispatchCount);
+	}
+
+	/* Start the render graph event scope */
+	RDG_EVENT_SCOPE(GraphBuilder, "Vapor Render Pass");
 
 	/* Convert the scene color texture to a screen pass texture */
 	FRDGTexture* SceneColor = Inputs.SceneTextures->GetContents()->SceneColorTexture;
@@ -88,12 +127,13 @@ void FVaporExtension::PrePostProcessPass_RenderThread(FRDGBuilder& GraphBuilder,
 	const FRDGTextureRef OutputTexture = GraphBuilder.CreateTexture(OutputDesc, TEXT("Vapor Output"));
 
 	/* Allocate and fill-in the shader pass parameters */
-	FCustomShader::FParameters* PassParameters = GraphBuilder.AllocParameters<FCustomShader::FParameters>();
+	FCloudShader::FParameters* PassParameters = GraphBuilder.AllocParameters<FCloudShader::FParameters>();
 	{
 		FScopeLock Lock(&RenderDataLock);
 		PassParameters->Cloud = TUniformBufferRef<FCloudscapeRenderData>::CreateUniformBufferImmediate(RenderData, EUniformBufferUsage::UniformBuffer_SingleFrame);
 	}
 	PassParameters->View = InView.ViewUniformBuffer;
+	PassParameters->WorleyNoise = GraphBuilder.CreateSRV(FRDGTextureSRVDesc(NoiseTexture));
 	PassParameters->SceneColor = SceneColor;
 	PassParameters->SceneDepth = SceneDepth;
 	PassParameters->Output = GraphBuilder.CreateUAV(FRDGTextureUAVDesc(OutputTexture));
@@ -102,10 +142,10 @@ void FVaporExtension::PrePostProcessPass_RenderThread(FRDGBuilder& GraphBuilder,
 	const FIntVector DispatchCount = FComputeShaderUtils::GetGroupCount(ViewSize, FComputeShaderUtils::kGolden2DGroupSize);
 
 	/* Load our custom shader from the global shader map */
-	TShaderMapRef<FCustomShader> ComputeShader(GlobalShaderMap);
+	TShaderMapRef<FCloudShader> ComputeShader(GlobalShaderMap);
 
 	FComputeShaderUtils::AddPass(GraphBuilder,
-		RDG_EVENT_NAME("Custom SceneViewExtension Post Processing CS Shader %dx%d", ViewSize.X, ViewSize.Y),
+		RDG_EVENT_NAME("Vapor Cloud Rendering %dx%d", ViewSize.X, ViewSize.Y),
 		ComputeShader, PassParameters, DispatchCount);
 
 	/* Finally copy our output texture back onto the scene color texture */

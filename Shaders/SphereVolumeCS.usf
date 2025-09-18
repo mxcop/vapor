@@ -1,8 +1,8 @@
 #include "Common.ush"
 
 // Ray Marching Parameters
-static const uint MAX_DIRECT_STEPS = 128;
-static const uint MAX_INDIRECT_STEPS = 128;
+static const uint MAX_DIRECT_STEPS = 256;
+static const uint MAX_INDIRECT_STEPS = 256;
 
 // Volume Parameters
 static const float SPHERE_SIZE = 100.0; // cm
@@ -19,11 +19,15 @@ struct CloudParameters {
     
     // Performance
     float MinStepSize;
-    int Method;
+    float InnerStepSize;
+    float StepSizeMult;
+    float ExtinctionThreshold;
 };
 
 // Cloud Parameters
 ConstantBuffer<CloudParameters> Cloud;
+
+Texture3D<float> WorleyNoise;
 
 // Scene Textures
 Texture2D<float3> SceneColor;
@@ -35,10 +39,16 @@ RWTexture2D<float4> Output;
 struct VolumeSample {
     float SDist;
     float Density;
+    bool Outside;
     
     /// Returns true if this sample is outside the volume.
-    inline bool IsOutside() { return Density == 0.0; }
+    inline bool IsOutside() { return Outside; }
 };
+
+/// Calculate the threshold path density at which the absorption reaches a given threshold.
+float CalcPathDensityThreshold(const float AbsorptionThreshold) {
+    return -log(AbsorptionThreshold) / min(min(Cloud.Absorption.r, Cloud.Absorption.g), Cloud.Absorption.b);
+}
 
 /// Returns the signed distance in the X component, and the density in the Y component.
 VolumeSample SampleVolume(const float3 Point) {
@@ -46,7 +56,13 @@ VolumeSample SampleVolume(const float3 Point) {
     const float UDist = distance(Cloud.Position, Point);
     VolumeSample Sample;
     Sample.SDist = abs(UDist - SPHERE_SIZE);
-    Sample.Density = UDist <= SPHERE_SIZE ? Cloud.Density : 0.0; // Homogeneous for now.
+    Sample.Outside = UDist > SPHERE_SIZE;
+    if (Sample.Outside) {
+        Sample.Density = 0.0;
+    } else {
+        const float DensityScale = 1.0 - UDist * (1.0 / SPHERE_SIZE);
+        Sample.Density = WorleyNoise.Sample(GlobalBilinearWrappedSampler, Point * 0.001) * DensityScale * Cloud.Density;
+    }
     return Sample; 
 }
 
@@ -61,25 +77,27 @@ float HenyeyGreenstein(float VdotL, float G) {
 }
 
 /// Trace the scene, find out how much light is being absorped.
-float3 TraceAbsorption(const float3 Origin, const float3 Dir, const float ViewDistance) {
+float3 TraceAbsorption(const float3 Origin, const float3 Dir, const float PathDensityThreshold) {
     // Traversal variables.
     float Distance = 0.0;
     float PathDensity = 0.0;
+    float StepSize = Cloud.InnerStepSize;
     
     for (uint s = 0; s < MAX_INDIRECT_STEPS; ++s) {
         // Sample the volume.
         const float3 SamplePos = Origin + Dir * Distance;
         const VolumeSample Sample = SampleVolume(SamplePos);
         
-        // Calculate our step size based on the signed distance to the volume.
-        const float StepSize = max(Cloud.MinStepSize, Sample.SDist);
-        Distance += StepSize; // Move along the ray to the next location.
-        
         // No work to be done outside the volume, just keep stepping.
-        if (Sample.IsOutside()) continue;
+        if (Sample.IsOutside()) {
+            Distance += max(Cloud.MinStepSize, Sample.SDist); // Move along the ray to the next location.
+            continue;
+        }
+        Distance += StepSize;
         
         // We're inside the volume, accumulate density.
         PathDensity += Sample.Density * StepSize;
+        if (PathDensity > PathDensityThreshold) break;
     }
     
     // Beer's Law <https://en.wikipedia.org/wiki/Beer%E2%80%93Lambert_law>
@@ -92,9 +110,12 @@ float3 TraceVolume(const float3 ViewColor, const float3 Origin, const float3 Dir
     float Absorption = 0.0;
     float3 Luminance = 0.0;
     float Distance = 0.0;
+    float StepSize = Cloud.InnerStepSize;
+    float PathDensity = 0.0;
+    const float PathDensityThreshold = CalcPathDensityThreshold(Cloud.ExtinctionThreshold);
     
     // Sun out-scattering will be identical everywhere along the ray, so we pre-calculate it.
-    const float Scattering = Cloud.SunLuminance * HenyeyGreenstein(dot(Dir, Cloud.SunDir), 0.2);
+    const float3 Scattering = Cloud.SunLuminance * HenyeyGreenstein(dot(Dir, Cloud.SunDir), 0.2);
     
     // Integrate luminance along the ray.
     for (uint s = 0; s < MAX_DIRECT_STEPS; ++s) {
@@ -102,67 +123,35 @@ float3 TraceVolume(const float3 ViewColor, const float3 Origin, const float3 Dir
         const float3 SamplePos = Origin + Dir * Distance;
         const VolumeSample Sample = SampleVolume(SamplePos);
         
-        // Calculate our step size based on the signed distance to the volume.
-        const float StepSize = max(Cloud.MinStepSize, Sample.SDist);
-        Distance += StepSize; // Move along the ray to the next location.
-        
         // No work to be done outside the volume, just keep stepping.
-        if (Sample.IsOutside()) continue;
+        if (Sample.IsOutside()) {
+            Distance += max(Cloud.MinStepSize, Sample.SDist); // Move along the ray to the next location.
+            continue;
+        }
+        Distance += StepSize;
         
         // Calculate the total density along our step.
         const float StepDensity = Sample.Density * StepSize;
         
         // Integrate the absorption along the ray.
         Absorption += StepDensity * (1.0 - Absorption);
+        // if (Absorption > (1.0 - Cloud.ExtinctionThreshold)) break;
         
-        // Integrate direct out-scattering from the sun. 
-        Luminance += TraceAbsorption(SamplePos, Cloud.SunDir, Distance) * Scattering * StepDensity * (1.0 - Absorption);
-    }
-    
-    // Finally, combine the view color with the luminance based on the absorption.
-    return lerp(ViewColor, Luminance, saturate(Absorption));
-}
-
-float3 TraceVolumeBeer(const float3 ViewColor, const float3 Origin, const float3 Dir) {
-    // Traversal variables.
-    float3 Luminance = 0.0;
-    float Distance = 0.0;
-    float PathDensity = 0.0;
-    
-    // Sun out-scattering will be identical everywhere along the ray, so we pre-calculate it.
-    const float Scattering = Cloud.SunLuminance * HenyeyGreenstein(dot(Dir, Cloud.SunDir), 0.2);
-    
-    // Integrate luminance along the ray.
-    for (uint s = 0; s < MAX_DIRECT_STEPS; ++s) {
-        // Sample the volume at the current location.
-        const float3 SamplePos = Origin + Dir * Distance;
-        const VolumeSample Sample = SampleVolume(SamplePos);
-        
-        // Calculate our step size based on the signed distance to the volume.
-        const float StepSize = max(Cloud.MinStepSize, Sample.SDist);
-        Distance += StepSize; // Move along the ray to the next location.
-        
-        // No work to be done outside the volume, just keep stepping.
-        if (Sample.IsOutside()) continue;
-        
-        // Calculate the total density along our step.
-        const float StepDensity = Sample.Density * StepSize;
-        
-        // Integrate the absorption along the ray.
+        // Integrate density along the ray.
         PathDensity += StepDensity;
         
-        // Beer's Law <https://en.wikipedia.org/wiki/Beer%E2%80%93Lambert_law>
-        const float3 PartialAbsorption = exp(-Cloud.Absorption * PathDensity);
-        
         // Integrate direct out-scattering from the sun. 
-        Luminance += TraceAbsorption(SamplePos, Cloud.SunDir, Distance) * Scattering * PartialAbsorption;
+        Luminance += TraceAbsorption(SamplePos, Cloud.SunDir, PathDensityThreshold) * Scattering * StepDensity * (1.0 - Absorption);
+        
+        // Update the step size based on the distance and absorption.
+        // StepSize = StepHeuristic(StepSize, Distance, Absorption);
     }
     
     // Beer's Law <https://en.wikipedia.org/wiki/Beer%E2%80%93Lambert_law>
-    const float3 Absorption = exp(-Cloud.Absorption * PathDensity);
+    const float3 PathAbsorption = exp(-Cloud.Absorption * PathDensity);
     
     // Finally, combine the view color with the luminance based on the absorption.
-    return ViewColor * Absorption + Luminance;
+    return ViewColor * PathAbsorption + Luminance;
 }
 
 // Compute Shader code
@@ -182,11 +171,6 @@ void MainCS(uint2 DispatchThreadId : SV_DispatchThreadID) {
     const float3 RayDirection = GetRayDirection(UV);
     
     // Ray vs Sphere intersection test.
-    if (Cloud.Method == 1) {
-        const float3 FinalColor = TraceVolumeBeer(SceneColor[Pixel], RayOrigin, RayDirection);
-        Output[Pixel] = float4(FinalColor, 1.0);
-    } else {
-        const float3 FinalColor = TraceVolume(SceneColor[Pixel], RayOrigin, RayDirection);
-        Output[Pixel] = float4(FinalColor, 1.0);
-    }
+    const float3 FinalColor = TraceVolume(SceneColor[Pixel], RayOrigin, RayDirection);
+    Output[Pixel] = float4(FinalColor, 1.0);
 }
