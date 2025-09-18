@@ -9,42 +9,22 @@
 #include "CloudscapeFactory.generated.h"
 
 /* Responsible for creating and importing Cloudscape objects. */
-UCLASS(hidecategories = Object, MinimalAPI)
-class UCloudscapeFactory : public UFactory, public FReimportHandler {
+UCLASS()
+class UCloudscapeFactory : public UFactory {
 	GENERATED_UCLASS_BODY()
+
 public:
-	/* ===== *
-	 * Factory Interface.
-	 * ===== */
-	inline bool ShouldShowInNewMenu() const override { return false; };
 	FText GetDisplayName() const override;
-	inline bool ConfigureProperties() override { return true; };
 
-	/* Asset Creation */
-	virtual UObject* FactoryCreateNew(UClass* InClass, UObject* InParent, FName InName, EObjectFlags Flags, UObject* Context, FFeedbackContext* Warn) override { return nullptr; };
-	inline bool CanCreateNew() const override { return true; };
-
-	/* Asset Importing */
 	virtual UObject* FactoryCreateFile(UClass* InClass, UObject* InParent, FName InName, EObjectFlags Flags, const FString& Filename,
-		const TCHAR* Parms, FFeedbackContext* Warn, bool& bOutOperationCanceled) override { return nullptr; };
-	virtual bool FactoryCanImport(const FString& Filename) override {
-		UE_LOG(LogTemp, Warning, TEXT("Tried to import file! %s"), *Filename);
-		return FPaths::GetExtension(Filename) == TEXT("vdb");
-	};
-	inline bool DoesSupportClass(UClass* Class) override { return true; };
-	virtual UClass* ResolveSupportedClass() override { return nullptr; };
+		const TCHAR* Parms, FFeedbackContext* Warn, bool& bOutOperationCanceled) override;
 
-	virtual void CleanUp() override;
-
-	/* ===== *
-	 * Reimport Handler Interface.
-	 * ===== */
-	virtual bool CanReimport(UObject* Obj, TArray<FString>& OutFilenames) override { return false; };
-	virtual void SetReimportPaths(UObject* Obj, const TArray<FString>& NewReimportPaths) override {};
-	virtual EReimportResult::Type Reimport(UObject* Obj) override { return EReimportResult::Succeeded; };
+	inline bool DoesSupportClass(UClass* Class) override;
+	virtual UClass* ResolveSupportedClass() override;
+	virtual bool FactoryCanImport(const FString& Filename) override;
 
 private:
-	UObject* ImportInternal(UClass* InClass, UObject* InParent, FName InName, EObjectFlags Flags, const FString& Filename, const TCHAR* Parms, bool& bOutOperationCanceled, bool bIsReimport) {};
+	UVolumeTexture* CreateVolumeTextureFromVDB(const FString& Filename, UObject* InParent, FName InName, EObjectFlags Flags);
 };
 
 #endif // WITH_EDITOR
