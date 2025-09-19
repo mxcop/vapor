@@ -7,12 +7,11 @@
 
 /* Vapor Instance Component */
 UCLASS(MinimalAPI)
-class UVaporComponent : public UPrimitiveComponent
-{
+class UVaporComponent : public UPrimitiveComponent {
 	GENERATED_UCLASS_BODY()
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cloudscape")
-	TObjectPtr<class UVolumeTexture> VolumeTexture;
+	TObjectPtr<class UVaporCloud> CloudAsset;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cloudscape")
 	FVector3f Absorption = FVector3f(1.2f, 1.0f, 0.9f);
@@ -35,8 +34,7 @@ class UVaporComponent : public UPrimitiveComponent
 
 /* Vapor Instance Actor */
 UCLASS(MinimalAPI)
-class AVapor : public AActor
-{
+class AVapor : public AActor {
 	GENERATED_UCLASS_BODY()
 
 private:

@@ -12,8 +12,9 @@ public class Boiler : ModuleRules
             "Core",
             "CoreUObject",
             "Engine",
-            "Projects"
-            });
+            "Projects",
+            "Vapor"
+        });
 
         // Editor dependencies
         if (Target.bBuildEditor)

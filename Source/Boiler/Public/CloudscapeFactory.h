@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "Factories/Factory.h"
 #include "EditorReimportHandler.h"
+#include "VaporCloud.h"
 
 #include "CloudscapeFactory.generated.h"
 
@@ -24,7 +25,7 @@ public:
 	virtual bool FactoryCanImport(const FString& Filename) override;
 
 private:
-	UVolumeTexture* CreateVolumeTextureFromVDB(const FString& Filename, UObject* InParent, FName InName, EObjectFlags Flags);
+	UVaporCloud* CreateVolumeTextureFromVDB(const FString& Filename, UObject* InParent, FName InName, EObjectFlags Flags);
 };
 
 #endif // WITH_EDITOR

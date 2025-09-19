@@ -8,6 +8,7 @@
 #include "PostProcess/PostProcessInputs.h"
 #include "VaporComponent.h"
 #include "Misc/Optional.h"
+#include "VaporCloud.h"
 
 IMPLEMENT_GLOBAL_SHADER(FCloudShader, "/Plugins/Vapor/SphereVolumeCS.usf", "MainCS", SF_Compute);
 IMPLEMENT_GLOBAL_SHADER(FNoiseShader, "/Plugins/Vapor/NoiseGenCS.usf", "MainCS", SF_Compute);
@@ -60,9 +61,9 @@ void FVaporExtension::BeginRenderViewFamily(FSceneViewFamily& ViewFamily) {
 	Data.StepSizeMult = VaporInstance->GetComponent()->StepSizeMult;
 	Data.ExtinctionThreshold = VaporInstance->GetComponent()->ExtinctionThreshold;
 
-	if (VaporInstance->GetComponent()->VolumeTexture) {
-		DensityTexture = VaporInstance->GetComponent()->VolumeTexture->GetResource();
-		if (DensityTexture == nullptr) DensityTexture = VaporInstance->GetComponent()->VolumeTexture->CreateResource();
+	if (VaporInstance->GetComponent()->CloudAsset) {
+		DensityTexture = VaporInstance->GetComponent()->CloudAsset->DensityField->GetResource();
+		if (DensityTexture == nullptr) DensityTexture = VaporInstance->GetComponent()->CloudAsset->DensityField->CreateResource();
 	}
 
 	FScopeLock Lock(&RenderDataLock);
