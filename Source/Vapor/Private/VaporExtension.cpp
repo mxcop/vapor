@@ -64,6 +64,8 @@ void FVaporExtension::BeginRenderViewFamily(FSceneViewFamily& ViewFamily) {
 	if (VaporInstance->GetComponent()->CloudAsset) {
 		DensityTexture = VaporInstance->GetComponent()->CloudAsset->DensityField->GetResource();
 		if (DensityTexture == nullptr) DensityTexture = VaporInstance->GetComponent()->CloudAsset->DensityField->CreateResource();
+		SDFTexture = VaporInstance->GetComponent()->CloudAsset->SignedDistanceField->GetResource();
+		if (SDFTexture == nullptr) SDFTexture = VaporInstance->GetComponent()->CloudAsset->SignedDistanceField->CreateResource();
 	}
 
 	FScopeLock Lock(&RenderDataLock);
@@ -117,7 +119,7 @@ void FVaporExtension::PrePostProcessPass_RenderThread(FRDGBuilder& GraphBuilder,
 	RDG_EVENT_SCOPE(GraphBuilder, "Vapor Render Pass");
 
 	/* Make sure the density texture is set */
-	if (DensityTexture == nullptr) return;
+	if (DensityTexture == nullptr || SDFTexture == nullptr) return;
 
 	/* Convert the scene color texture to a screen pass texture */
 	FRDGTexture* SceneColor = Inputs.SceneTextures->GetContents()->SceneColorTexture;
@@ -139,8 +141,9 @@ void FVaporExtension::PrePostProcessPass_RenderThread(FRDGBuilder& GraphBuilder,
 	/* Allocate and fill-in the shader pass parameters */
 	FCloudShader::FParameters* PassParameters = GraphBuilder.AllocParameters<FCloudShader::FParameters>();
 	{
-		RenderData.DensityTexture = GraphBuilder.RegisterExternalTexture(CreateRenderTarget(DensityTexture->GetTextureRHI(), TEXT("Density Texture")));
 		FScopeLock Lock(&RenderDataLock);
+		RenderData.DensityTexture = GraphBuilder.RegisterExternalTexture(CreateRenderTarget(DensityTexture->GetTextureRHI(), TEXT("Density Texture")));
+		RenderData.SDFTexture = GraphBuilder.RegisterExternalTexture(CreateRenderTarget(SDFTexture->GetTextureRHI(), TEXT("SDF Texture")));
 		PassParameters->Cloud = TUniformBufferRef<FCloudscapeRenderData>::CreateUniformBufferImmediate(RenderData, EUniformBufferUsage::UniformBuffer_SingleFrame);
 	}
 	PassParameters->View = InView.ViewUniformBuffer;

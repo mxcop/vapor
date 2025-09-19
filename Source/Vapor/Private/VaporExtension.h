@@ -19,12 +19,14 @@ BEGIN_UNIFORM_BUFFER_STRUCT(FCloudscapeRenderData, )
 	SHADER_PARAMETER(float, StepSizeMult)
 	SHADER_PARAMETER(float, ExtinctionThreshold)
 	SHADER_PARAMETER_RDG_TEXTURE(Texture3D, DensityTexture)
+	SHADER_PARAMETER_RDG_TEXTURE(Texture3D, SDFTexture)
 END_UNIFORM_BUFFER_STRUCT()
 
 class FVaporExtension : public FSceneViewExtensionBase {
 	// Frame Render Data
 	FCloudscapeRenderData RenderData;
 	FTextureResource* DensityTexture = nullptr;
+	FTextureResource* SDFTexture = nullptr;
 	FCriticalSection RenderDataLock;
 
 	// Worley Noise Texture

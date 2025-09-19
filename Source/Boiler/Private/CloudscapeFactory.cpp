@@ -128,6 +128,7 @@ void ResampleSignedDistanceField(UVolumeTexture& Output, openvdb::FloatGrid& Inp
 	const double StepY = GridExtent.y() / VTEX_Y;
 	const double StepZ = GridExtent.z() / VTEX_Z;
 	const double StepSize = std::max(std::max(StepX, StepY), StepZ);
+	const double MaxDistance = FVector3d(GridExtent.x(), GridExtent.y(), GridExtent.z()).Length();
 
 	/* Find the min and max density in the grid */
 	float MinDensity = 0.0f;
@@ -150,11 +151,12 @@ void ResampleSignedDistanceField(UVolumeTexture& Output, openvdb::FloatGrid& Inp
 				);
 
 				/* Sample the SDF grid */
-				const float Distance = sampler.wsSample(WorldPos);
+				const double Distance = sampler.wsSample(WorldPos);
+				const double NormalizedDistance = Distance / MaxDistance; /* (-1..1) */
 
 				/* Calculate the texture index and write our distance data */
 				const int32 index = x + (y * VTEX_X) + (z * VTEX_X * VTEX_Y);
-				TextureData[index] = Distance;
+				TextureData[index] = std::max(0.0, NormalizedDistance);
 			}
 		}
 	}
@@ -164,7 +166,7 @@ void ResampleSignedDistanceField(UVolumeTexture& Output, openvdb::FloatGrid& Inp
 
 	/* Set all the volume texture settings */
 	Output.MipGenSettings = TMGS_NoMipmaps;
-	Output.CompressionSettings = TC_HalfFloat;
+	Output.CompressionSettings = TC_Grayscale;
 	Output.SRGB = false;
 	Output.Filter = TF_Bilinear;
 	Output.AddressMode = TA_Wrap;
@@ -217,7 +219,7 @@ UVaporCloud* UCloudscapeFactory::CreateVolumeTextureFromVDB(const FString& Filen
 
 	/* Initialize the volume textures */
 	DensityField.Source.Init(VTEX_X, VTEX_Y, VTEX_Z, 1, TSF_G8, nullptr);
-	SignedDistanceField.Source.Init(VTEX_X, VTEX_Y, VTEX_Z, 1, TSF_R16F, nullptr);
+	SignedDistanceField.Source.Init(VTEX_X, VTEX_Y, VTEX_Z, 1, TSF_G16, nullptr);
 
 	/* Re-sample the density field */
 	ResampleDensityField(DensityField, *DensityGrid);
