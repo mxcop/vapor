@@ -128,7 +128,6 @@ float3 TraceVolume(const float3 ViewColor, const float3 Origin, const float3 Dir
     float StepSize = Cloud.InnerStepSize;
     float PathDensity = 0.0;
     const float PathDensityThreshold = CalcPathDensityThreshold(Cloud.ExtinctionThreshold);
-    bool HitVolume = false;
     
     // Sun out-scattering will be identical everywhere along the ray, so we pre-calculate it.
     const float3 Scattering = Cloud.SunLuminance * HenyeyGreenstein(dot(Dir, Cloud.SunDir), 0.2);
@@ -145,7 +144,6 @@ float3 TraceVolume(const float3 ViewColor, const float3 Origin, const float3 Dir
             continue;
         }
         Distance += StepSize;
-        HitVolume = true;
         
         // Calculate the total density along our step.
         const float StepDensity = Sample.Density * StepSize;
