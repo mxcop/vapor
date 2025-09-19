@@ -22,6 +22,8 @@ struct CloudParameters {
     float InnerStepSize;
     float StepSizeMult;
     float ExtinctionThreshold;
+    
+    Texture3D<float> DensityTexture;
 };
 
 // Cloud Parameters
@@ -53,17 +55,30 @@ float CalcPathDensityThreshold(const float AbsorptionThreshold) {
 /// Returns the signed distance in the X component, and the density in the Y component.
 VolumeSample SampleVolume(const float3 Point) {
     // Calculate the signed distance to the volume.
-    const float UDist = distance(Cloud.Position, Point);
+    //const float UDist = distance(Cloud.Position, Point);
+    //VolumeSample Sample;
+    //Sample.SDist = abs(UDist - SPHERE_SIZE);
+    //Sample.Outside = UDist > SPHERE_SIZE;
+    //if (Sample.Outside) {
+    //    Sample.Density = 0.0;
+    //} else {
+    //    const float DensityScale = 1.0 - UDist * (1.0 / SPHERE_SIZE);
+    //    // Sample.Density = WorleyNoise.Sample(GlobalBilinearWrappedSampler, Point * 0.001) * DensityScale * Cloud.Density;
+    //    Sample.Density = Cloud.DensityTexture.Sample(GlobalBilinearWrappedSampler, Point / 100.0) * Cloud.Density;
+    //}
+    //return Sample;
+    
+    const float3 Q = abs(Cloud.Position - Point) - float3(SPHERE_SIZE, SPHERE_SIZE, SPHERE_SIZE);
+    const float SDist = length(max(Q, 0.0)) + min(max(Q.x, max(Q.y, Q.z)), 0.0);
     VolumeSample Sample;
-    Sample.SDist = abs(UDist - SPHERE_SIZE);
-    Sample.Outside = UDist > SPHERE_SIZE;
+    Sample.SDist = SDist;
+    Sample.Outside = SDist > 0.0;
     if (Sample.Outside) {
         Sample.Density = 0.0;
     } else {
-        const float DensityScale = 1.0 - UDist * (1.0 / SPHERE_SIZE);
-        Sample.Density = WorleyNoise.Sample(GlobalBilinearWrappedSampler, Point * 0.001) * DensityScale * Cloud.Density;
+        Sample.Density = Cloud.DensityTexture.Sample(GlobalBilinearWrappedSampler, Point.xzy / 100.0 * 0.5 + 0.5) * Cloud.Density;
     }
-    return Sample; 
+    return Sample;
 }
 
 // Anisotropic scattering function for clouds.
@@ -113,6 +128,7 @@ float3 TraceVolume(const float3 ViewColor, const float3 Origin, const float3 Dir
     float StepSize = Cloud.InnerStepSize;
     float PathDensity = 0.0;
     const float PathDensityThreshold = CalcPathDensityThreshold(Cloud.ExtinctionThreshold);
+    bool HitVolume = false;
     
     // Sun out-scattering will be identical everywhere along the ray, so we pre-calculate it.
     const float3 Scattering = Cloud.SunLuminance * HenyeyGreenstein(dot(Dir, Cloud.SunDir), 0.2);
@@ -129,6 +145,7 @@ float3 TraceVolume(const float3 ViewColor, const float3 Origin, const float3 Dir
             continue;
         }
         Distance += StepSize;
+        HitVolume = true;
         
         // Calculate the total density along our step.
         const float StepDensity = Sample.Density * StepSize;

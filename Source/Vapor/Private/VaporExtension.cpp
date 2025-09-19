@@ -1,6 +1,7 @@
 #include "VaporExtension.h"
 
 #include "Engine/DirectionalLight.h"
+#include "Engine/VolumeTexture.h"
 #include "Components/DirectionalLightComponent.h"
 #include "Components/SkyAtmosphereComponent.h"
 #include "EngineUtils.h"
@@ -59,6 +60,11 @@ void FVaporExtension::BeginRenderViewFamily(FSceneViewFamily& ViewFamily) {
 	Data.StepSizeMult = VaporInstance->GetComponent()->StepSizeMult;
 	Data.ExtinctionThreshold = VaporInstance->GetComponent()->ExtinctionThreshold;
 
+	if (VaporInstance->GetComponent()->VolumeTexture) {
+		DensityTexture = VaporInstance->GetComponent()->VolumeTexture->GetResource();
+		if (DensityTexture == nullptr) DensityTexture = VaporInstance->GetComponent()->VolumeTexture->CreateResource();
+	}
+
 	FScopeLock Lock(&RenderDataLock);
 	RenderData = MoveTemp(Data);
 }
@@ -109,6 +115,9 @@ void FVaporExtension::PrePostProcessPass_RenderThread(FRDGBuilder& GraphBuilder,
 	/* Start the render graph event scope */
 	RDG_EVENT_SCOPE(GraphBuilder, "Vapor Render Pass");
 
+	/* Make sure the density texture is set */
+	if (DensityTexture == nullptr) return;
+
 	/* Convert the scene color texture to a screen pass texture */
 	FRDGTexture* SceneColor = Inputs.SceneTextures->GetContents()->SceneColorTexture;
 	FRDGTexture* SceneDepth = Inputs.SceneTextures->GetContents()->SceneDepthTexture;
@@ -129,6 +138,7 @@ void FVaporExtension::PrePostProcessPass_RenderThread(FRDGBuilder& GraphBuilder,
 	/* Allocate and fill-in the shader pass parameters */
 	FCloudShader::FParameters* PassParameters = GraphBuilder.AllocParameters<FCloudShader::FParameters>();
 	{
+		RenderData.DensityTexture = GraphBuilder.RegisterExternalTexture(CreateRenderTarget(DensityTexture->GetTextureRHI(), TEXT("Density Texture")));
 		FScopeLock Lock(&RenderDataLock);
 		PassParameters->Cloud = TUniformBufferRef<FCloudscapeRenderData>::CreateUniformBufferImmediate(RenderData, EUniformBufferUsage::UniformBuffer_SingleFrame);
 	}

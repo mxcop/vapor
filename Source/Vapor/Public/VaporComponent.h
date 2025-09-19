@@ -12,7 +12,7 @@ class UVaporComponent : public UPrimitiveComponent
 	GENERATED_UCLASS_BODY()
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cloudscape")
-	TObjectPtr<class USparseVolumeTexture> SparseVolumeTexturePreview;
+	TObjectPtr<class UVolumeTexture> VolumeTexture;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cloudscape")
 	FVector3f Absorption = FVector3f(1.2f, 1.0f, 0.9f);

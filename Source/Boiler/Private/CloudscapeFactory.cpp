@@ -46,9 +46,9 @@ UObject* UCloudscapeFactory::FactoryCreateFile(UClass* InClass, UObject* InParen
 }
 
 /* Volume texture size */
-constexpr uint32 VTEX_X = 128;
-constexpr uint32 VTEX_Y = 128;
-constexpr uint32 VTEX_Z = 128;
+constexpr uint32 VTEX_X = 32;
+constexpr uint32 VTEX_Y = 32;
+constexpr uint32 VTEX_Z = 32;
 
 UVolumeTexture* UCloudscapeFactory::CreateVolumeTextureFromVDB(const FString& Filename, UObject* InParent, FName InName, EObjectFlags Flags) {
 	/* Init OpenVDB */
@@ -104,25 +104,25 @@ UVolumeTexture* UCloudscapeFactory::CreateVolumeTextureFromVDB(const FString& Fi
 	const float DensityRange = MaxDensity - MinDensity;
 
 	/* Create a grid sampler and lock the volume texture data */
-	openvdb::tools::GridSampler<openvdb::FloatGrid, openvdb::tools::BoxSampler> sampler(*DensityGrid);
+	openvdb::tools::GridSampler<openvdb::FloatGrid, openvdb::tools::QuadraticSampler> sampler(*DensityGrid);
 	uint8* TextureData = VolumeTexture->Source.LockMip(0);
 
 	/* Re-sample the density grid */
 	for (int32 z = 0; z < VTEX_Z; ++z) {
 		for (int32 y = 0; y < VTEX_Y; ++y) {
 			for (int32 x = 0; x < VTEX_X; ++x) {
-				const openvdb::Vec3d worldPos(
+				const openvdb::Vec3d WorldPos(
 					GridMin.x() + x * StepSize,
 					GridMin.y() + y * StepSize,
 					GridMin.z() + z * StepSize
 				);
 
 				/* Sample the density grid */
-				const float Density = sampler.wsSample(worldPos) / DensityRange;
+				const float Density = sampler.wsSample(WorldPos) / DensityRange;
 				const uint8 DensityData = (uint8)(Density * 255.0f);
 
 				/* Calculate the texture index and write our density data */
-				const int32 index = x + ((VTEX_Y - y - 1) * VTEX_X) + (z * VTEX_X * VTEX_Y);
+				const int32 index = x + (y * VTEX_X) + (z * VTEX_X * VTEX_Y);
 				TextureData[index] = DensityData;
 			}
 		}
@@ -136,7 +136,7 @@ UVolumeTexture* UCloudscapeFactory::CreateVolumeTextureFromVDB(const FString& Fi
 	VolumeTexture->CompressionSettings = TC_Grayscale;
 	VolumeTexture->SRGB = false;
 	VolumeTexture->Filter = TF_Bilinear;
-	VolumeTexture->AddressMode = TA_Clamp;
+	VolumeTexture->AddressMode = TA_Wrap;
 
 	/* Update the volume texture resource */
 	VolumeTexture->UpdateResource();
