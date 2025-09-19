@@ -52,6 +52,16 @@ float CalcPathDensityThreshold(const float AbsorptionThreshold) {
     return -log(AbsorptionThreshold) / min(min(Cloud.Absorption.r, Cloud.Absorption.g), Cloud.Absorption.b);
 }
 
+/// Calculate a distance-based step size for ray-marching.
+float CalcStepSize(const float Distance) {
+    // Step size constants.
+    static const float MIN_STEP_SIZE = 3.0;
+    static const float STEP_DISTANCE = 250.0;
+
+    // Distance-based step size.
+    return MIN_STEP_SIZE + Distance * (1.0 / STEP_DISTANCE);
+}
+
 /// Returns the signed distance in the X component, and the density in the Y component.
 VolumeSample SampleVolume(const float3 Point) {
     // Calculate the signed distance to the volume.
@@ -143,6 +153,7 @@ float3 TraceVolume(const float3 ViewColor, const float3 Origin, const float3 Dir
             Distance += max(Cloud.MinStepSize, Sample.SDist); // Move along the ray to the next location.
             continue;
         }
+        StepSize = CalcStepSize(Distance);
         Distance += StepSize;
         
         // Calculate the total density along our step.
