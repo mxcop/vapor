@@ -32,6 +32,8 @@ class FVaporExtension : public FSceneViewExtensionBase {
 	// Alligator Noise Texture
 	FTextureRHIRef AlligatorNoiseTexture;
 
+	FTextureRHIRef PathDensityTexture;
+
 public:
 	FVaporExtension(const FAutoRegister& AutoRegister);
 
@@ -57,6 +59,7 @@ public:
 		SHADER_PARAMETER_STRUCT_REF(FCloudscapeRenderData, Cloud)
 		SHADER_PARAMETER_STRUCT_REF(FViewUniformShaderParameters, View)
 		SHADER_PARAMETER_RDG_TEXTURE_SRV(Texture3D, AlligatorNoise)
+		SHADER_PARAMETER_RDG_TEXTURE_SRV(Texture3D, PathDensityTexture)
 		SHADER_PARAMETER_RDG_TEXTURE(Texture2D, SceneColor)
 		SHADER_PARAMETER_RDG_TEXTURE(Texture2D, SceneDepth)
 		SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D<float4>, Output)
@@ -84,6 +87,31 @@ public:
 
 	BEGIN_SHADER_PARAMETER_STRUCT(FParameters, )
 		SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture3D<float>, Output)
+	END_SHADER_PARAMETER_STRUCT()
+
+	// Basic shader initialization
+	static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters) {
+		return IsFeatureLevelSupported(Parameters.Platform, ERHIFeatureLevel::SM5);
+	}
+
+	// Define environment variables used by compute shader
+	static void ModifyCompilationEnvironment(const FGlobalShaderPermutationParameters& Parameters, FShaderCompilerEnvironment& OutEnvironment) {
+		OutEnvironment.SetDefine(TEXT("THREADS_X"), 4);
+		OutEnvironment.SetDefine(TEXT("THREADS_Y"), 4);
+		OutEnvironment.SetDefine(TEXT("THREADS_Z"), 4);
+	}
+};
+
+// SH Bake shader.
+class FBakeShader : public FGlobalShader {
+public:
+	DECLARE_GLOBAL_SHADER(FBakeShader)
+
+	SHADER_USE_PARAMETER_STRUCT(FBakeShader, FGlobalShader)
+
+	BEGIN_SHADER_PARAMETER_STRUCT(FParameters, )
+		SHADER_PARAMETER_STRUCT_REF(FCloudscapeRenderData, Cloud)
+		SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture3D<float4>, OutputSH)
 	END_SHADER_PARAMETER_STRUCT()
 
 	// Basic shader initialization

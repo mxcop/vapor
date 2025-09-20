@@ -10,6 +10,10 @@ static const float SPHERE_SIZE = 100.0; // cm
 // Cloud Parameters
 ConstantBuffer<CloudParameters> Cloud;
 
+static const float NOISE_FREQ = 0.01;
+Texture3D<float> AlligatorNoise;
+Texture3D<float4> PathDensityTexture;
+
 // Scene Textures
 Texture2D<float3> SceneColor;
 Texture2D<float> SceneDepth;
@@ -76,8 +80,13 @@ float3 TraceAbsorption(const float3 Origin, const float3 Dir, const float PathDe
         if (PathDensity > PathDensityThreshold) break;
     }
     
+    // Sample path density from baked spherical harmonics.
+    //const float3 UVW = (Origin - Cloud.Position) / CLOUD_BOUNDS * 0.5 + 0.5;
+    //const float4 SH1 = PathDensityTexture.Sample(GlobalBilinearClampedSampler, UVW);
+    //const float PathDensity = Cloud.Density * (SH1.x + dot(SH1.yzw, Dir) * 3.0);
+    
     // Beer's Law <https://en.wikipedia.org/wiki/Beer%E2%80%93Lambert_law>
-    const float3 Absorption = exp(-Cloud.Absorption * PathDensity);
+    const float3 Absorption = saturate(exp(-Cloud.Absorption * PathDensity));
     return Absorption;
 }
 
@@ -121,14 +130,14 @@ float3 TraceVolume(const float3 ViewColor, const float3 Origin, const float3 Dir
         Absorption += StepDensity * (1.0 - Absorption);
         
         // Integrate density along the ray.
-        PathDensity += StepDensity;
+        PathDensity += (Sample.Density() / Cloud.Density) * StepSize; // StepDensity;
         
         // Integrate direct out-scattering from the sun. 
         Luminance += TraceAbsorption(SamplePos, Cloud.SunDir, PathDensityThreshold) * Scattering * StepDensity * (1.0 - Absorption);
     }
     
     // Beer's Law <https://en.wikipedia.org/wiki/Beer%E2%80%93Lambert_law>
-    const float3 PathAbsorption = exp(-Cloud.Absorption * PathDensity);
+    const float3 PathAbsorption = saturate(exp(-Cloud.Absorption * PathDensity * Cloud.Density));
     
     // Finally, combine the view color with the luminance based on the absorption.
     return ViewColor * PathAbsorption + Luminance;

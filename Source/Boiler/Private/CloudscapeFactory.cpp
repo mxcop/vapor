@@ -121,51 +121,51 @@ void ResampleDensityField(UVolumeTexture& Output, openvdb::FloatGrid& Input) {
 /** @brief Re-sample a VDB float grid as signed distance field. */
 void ResampleSignedDistanceField(UVolumeTexture& Output, openvdb::FloatGrid& Input) {
 	/* Convert the density grid data to a signed distance field */
-	const openvdb::FloatGrid::Ptr SdfGrid = openvdb::tools::fogToSdf(Input, 0.01f);
+	//const openvdb::FloatGrid::Ptr SdfGrid = openvdb::tools::fogToSdf(Input, 0.01f);
 
 	/* Get the extent of the grid in world space */
-	const openvdb::math::Transform GridTransform = SdfGrid->transform();
-	const openvdb::CoordBBox AABB = SdfGrid->evalActiveVoxelBoundingBox();
-	const openvdb::Vec3d GridMin = GridTransform.indexToWorld(AABB.min());
-	const openvdb::Vec3d GridExtent = GridTransform.indexToWorld(AABB.max()) - GridMin;
+	//const openvdb::math::Transform GridTransform = SdfGrid->transform();
+	//const openvdb::CoordBBox AABB = SdfGrid->evalActiveVoxelBoundingBox();
+	//const openvdb::Vec3d GridMin = GridTransform.indexToWorld(AABB.min());
+	//const openvdb::Vec3d GridExtent = GridTransform.indexToWorld(AABB.max()) - GridMin;
 
 	/* Calculate the step size along each axis */
-	const double StepX = GridExtent.x() / VTEX_X;
-	const double StepY = GridExtent.y() / VTEX_Y;
-	const double StepZ = GridExtent.z() / VTEX_Z;
-	const double StepSize = std::max(std::max(StepX, StepY), StepZ);
-	const double MaxDistance = FVector3d(GridExtent.x(), GridExtent.y(), GridExtent.z()).Length();
+	//const double StepX = GridExtent.x() / VTEX_X;
+	//const double StepY = GridExtent.y() / VTEX_Y;
+	//const double StepZ = GridExtent.z() / VTEX_Z;
+	//const double StepSize = std::max(std::max(StepX, StepY), StepZ);
+	//const double MaxDistance = FVector3d(GridExtent.x(), GridExtent.y(), GridExtent.z()).Length();
 
 	/* Find the min and max density in the grid */
-	float MinDensity = 0.0f;
-	float MaxDensity = 0.0f;
-	SdfGrid->evalMinMax(MinDensity, MaxDensity);
-	const float DensityRange = MaxDensity - MinDensity;
+	//float MinDensity = 0.0f;
+	//float MaxDensity = 0.0f;
+	//SdfGrid->evalMinMax(MinDensity, MaxDensity);
+	//const float DensityRange = MaxDensity - MinDensity;
 
 	/* Create a grid sampler and lock the volume texture data */
-	openvdb::tools::GridSampler<openvdb::FloatGrid, openvdb::tools::QuadraticSampler> sampler(*SdfGrid);
+	//openvdb::tools::GridSampler<openvdb::FloatGrid, openvdb::tools::QuadraticSampler> sampler(*SdfGrid);
 	uint8* TextureData = Output.Source.LockMip(0);
 
 	/* Re-sample the SDF grid */
-	for (int32 z = 0; z < VTEX_Z; ++z) {
-		for (int32 y = 0; y < VTEX_Y; ++y) {
-			for (int32 x = 0; x < VTEX_X; ++x) {
-				const openvdb::Vec3d WorldPos(
-					GridMin.x() + x * StepSize,
-					GridMin.y() + y * StepSize,
-					GridMin.z() + z * StepSize
-				);
+	//for (int32 z = 0; z < VTEX_Z; ++z) {
+	//	for (int32 y = 0; y < VTEX_Y; ++y) {
+	//		for (int32 x = 0; x < VTEX_X; ++x) {
+	//			const openvdb::Vec3d WorldPos(
+	//				GridMin.x() + x * StepSize,
+	//				GridMin.y() + y * StepSize,
+	//				GridMin.z() + z * StepSize
+	//			);
 
-				/* Sample the SDF grid */
-				const double Distance = sampler.wsSample(WorldPos);
-				const double NormalizedDistance = Distance / MaxDistance; /* (-1..1) */
+	//			/* Sample the SDF grid */
+	//			const double Distance = sampler.wsSample(WorldPos);
+	//			const double NormalizedDistance = Distance / MaxDistance; /* (-1..1) */
 
-				/* Calculate the texture index and write our distance data */
-				const int32 index = x + (y * VTEX_X) + (z * VTEX_X * VTEX_Y);
-				TextureData[index] = std::max(0.0, NormalizedDistance);
-			}
-		}
-	}
+	//			/* Calculate the texture index and write our distance data */
+	//			const int32 index = x + (y * VTEX_X) + (z * VTEX_X * VTEX_Y);
+	//			TextureData[index] = std::max(0.0, NormalizedDistance);
+	//		}
+	//	}
+	//}
 
 	/* Unlock the volume texture data */
 	Output.Source.UnlockMip(0);
@@ -203,7 +203,14 @@ UVaporCloud* UCloudscapeFactory::CreateVolumeTextureFromVDB(const FString& Filen
 	}
 
 	/* Just grab the first grid in the file for now */
-	const openvdb::GridBase::Ptr BaseGrid = File.getGrids()->front();
+	openvdb::GridBase::Ptr BaseGrid = File.getGrids()->front();
+	for (uint32 i = 0; i < File.getGrids()->size(); ++i) {
+		const openvdb::GridBase::Ptr Grid = File.getGrids()->at(i);
+		if (Grid->getName() == "dimensional_profile") {
+			BaseGrid = Grid;
+		}
+		UE_LOG(LogTemp, Warning, TEXT("VDB Grid: %s"), UTF8_TO_TCHAR(File.getGrids()->at(i)->getName().c_str()));
+	}
 	BaseGrid->setTransform(openvdb::math::Transform::createLinearTransform());
 	const openvdb::FloatGrid::Ptr DensityGrid = openvdb::gridPtrCast<openvdb::FloatGrid>(BaseGrid);
 
