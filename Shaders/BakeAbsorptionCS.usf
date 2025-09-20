@@ -26,8 +26,8 @@ void AccumulateSH1(inout float4 SH1, const float3 Dir, const float Value) {
 /// Source: <https://stackoverflow.com/questions/9600801/evenly-distributing-n-points-on-a-sphere>
 float3 FibonacciSphere(const uint Step, const uint Steps) {
     static const float GOLDEN_RATIO = 1.618033988749895;
-    const float Theta = 2.0 * 3.14159265359 * Step / GOLDEN_RATIO;
-    const float Phi = acos(1.0 - 2.0 * (Step + 0.5) / Steps);
+    const float Theta = 2.0 * 3.14159265359 * float(Step) / GOLDEN_RATIO;
+    const float Phi = acos(1.0 - 2.0 * (float(Step) + 0.5) / float(Steps));
     const float SinPhi = sin(Phi);
     return normalize(float3(cos(Theta) * SinPhi, sin(Theta) * SinPhi, cos(Phi)));
 }
@@ -39,14 +39,14 @@ CloudSample SampleVolume(const float3 UVW) {
 /// Trace the scene, find out how much light is being absorped.
 float TracePathDensity(const float3 Origin, const float3 Dir) {
     // Intersect the bounds of the volume, return early if we miss.
-    const float2 BoundsIntersection = RayAABB(Origin, Dir, float3(0.0, 0.0, 0.0), float3(1.0, 1.0, 1.0));
+    const float2 BoundsIntersection = RayAABB(Origin, Dir, float3(0.0, 0.0, 0.0), float3(100.0, 100.0, 100.0));
     
     // Traversal variables.
     float Distance = max(0.0, BoundsIntersection.x);
     float PathDensity = 0.0;
-    float StepSize = 0.006;
+    float StepSize = 1.0;
     
-    for (uint s = 0; s < 512; ++s) {
+    for (uint s = 0; s < 256; ++s) {
         if (Distance >= BoundsIntersection.y) break;
         
         // Sample the volume.
@@ -69,7 +69,7 @@ void MainCS(uint3 DispatchThreadId : SV_DispatchThreadID) {
     //uint W, H, D; // Get the UVW of this thread.
     //OutputSH.GetDimensions(W, H, D);
     //const uint3 OutputSize = uint3(W, H, D);
-    const float3 UVW = (float3(DispatchThreadId) + 0.5) / 512.0;
+    const float3 UVW = (float3(DispatchThreadId) + 0.5) / 512.0 * 100.0;
 
     // Create empty spherical harmonics.
     float4 SH1 = float4(0.0, 0.0, 0.0, 0.0);
@@ -86,5 +86,5 @@ void MainCS(uint3 DispatchThreadId : SV_DispatchThreadID) {
     // const float PathDensity = TracePathDensity(UVW, Cloud.SunDir);
     
     // Output the normalized spherical harmonics.
-    OutputSH[DispatchThreadId] = SH1 * 25.0 / INTEGRATION_STEPS;
+    OutputSH[DispatchThreadId] = SH1 / INTEGRATION_STEPS;
 }
