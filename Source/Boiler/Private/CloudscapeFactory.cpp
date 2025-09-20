@@ -11,6 +11,8 @@ THIRD_PARTY_INCLUDES_START
 #include "openvdb/Grid.h"
 #include "openvdb/tools/Interpolation.h"
 #include "openvdb/tools/FastSweeping.h"
+#include <openvdb/tools/GridTransformer.h>
+#include <openvdb/tools/Filter.h>
 #undef UpdateResource /* <- Windows header included somewhere... */
 THIRD_PARTY_INCLUDES_END
 
@@ -49,9 +51,9 @@ UObject* UCloudscapeFactory::FactoryCreateFile(UClass* InClass, UObject* InParen
 }
 
 /* Volume texture size */
-constexpr uint32 VTEX_X = 128;
-constexpr uint32 VTEX_Y = 128;
-constexpr uint32 VTEX_Z = 128;
+constexpr uint32 VTEX_X = 64;
+constexpr uint32 VTEX_Y = 64;
+constexpr uint32 VTEX_Z = 64;
 
 /** @brief Re-sample a VDB float grid as density field. */
 void ResampleDensityField(UVolumeTexture& Output, openvdb::FloatGrid& Input) {
@@ -73,8 +75,12 @@ void ResampleDensityField(UVolumeTexture& Output, openvdb::FloatGrid& Input) {
 	Input.evalMinMax(MinDensity, MaxDensity);
 	const float DensityRange = MaxDensity - MinDensity;
 
+	/* Pre-filter the input grid for down-sampling */
+	openvdb::tools::Filter<openvdb::FloatGrid> Filter(Input);
+	Filter.gaussian(StepSize, 1);
+
 	/* Create a grid sampler and lock the volume texture data */
-	openvdb::tools::GridSampler<openvdb::FloatGrid, openvdb::tools::QuadraticSampler> sampler(Input);
+	openvdb::tools::GridSampler<openvdb::FloatGrid, openvdb::tools::BoxSampler> sampler(Input);
 	uint8* TextureData = Output.Source.LockMip(0);
 
 	/* Re-sample the density grid */
@@ -198,6 +204,7 @@ UVaporCloud* UCloudscapeFactory::CreateVolumeTextureFromVDB(const FString& Filen
 
 	/* Just grab the first grid in the file for now */
 	const openvdb::GridBase::Ptr BaseGrid = File.getGrids()->front();
+	BaseGrid->setTransform(openvdb::math::Transform::createLinearTransform());
 	const openvdb::FloatGrid::Ptr DensityGrid = openvdb::gridPtrCast<openvdb::FloatGrid>(BaseGrid);
 
 	/* Make sure our grid is a float grid */

@@ -29,8 +29,8 @@ class FVaporExtension : public FSceneViewExtensionBase {
 	FTextureResource* SDFTexture = nullptr;
 	FCriticalSection RenderDataLock;
 
-	// Worley Noise Texture
-	FTextureRHIRef WorleyTexture;
+	// Alligator Noise Texture
+	FTextureRHIRef AlligatorNoiseTexture;
 
 public:
 	FVaporExtension(const FAutoRegister& AutoRegister);
@@ -56,7 +56,7 @@ public:
 	BEGIN_SHADER_PARAMETER_STRUCT(FParameters, )
 		SHADER_PARAMETER_STRUCT_REF(FCloudscapeRenderData, Cloud)
 		SHADER_PARAMETER_STRUCT_REF(FViewUniformShaderParameters, View)
-		SHADER_PARAMETER_RDG_TEXTURE_SRV(Texture3D, WorleyNoise)
+		SHADER_PARAMETER_RDG_TEXTURE_SRV(Texture3D, AlligatorNoise)
 		SHADER_PARAMETER_RDG_TEXTURE(Texture2D, SceneColor)
 		SHADER_PARAMETER_RDG_TEXTURE(Texture2D, SceneDepth)
 		SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D<float4>, Output)

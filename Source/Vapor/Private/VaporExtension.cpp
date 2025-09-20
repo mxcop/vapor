@@ -10,7 +10,7 @@
 #include "Misc/Optional.h"
 #include "VaporCloud.h"
 
-IMPLEMENT_GLOBAL_SHADER(FCloudShader, "/Plugins/Vapor/SphereVolumeCS.usf", "MainCS", SF_Compute);
+IMPLEMENT_GLOBAL_SHADER(FCloudShader, "/Plugins/Vapor/CloudMarchCS.usf", "MainCS", SF_Compute);
 IMPLEMENT_GLOBAL_SHADER(FNoiseShader, "/Plugins/Vapor/NoiseGenCS.usf", "MainCS", SF_Compute);
 
 IMPLEMENT_UNIFORM_BUFFER_STRUCT(FCloudscapeRenderData, "Cloud");
@@ -79,26 +79,24 @@ void FVaporExtension::PrePostProcessPass_RenderThread(FRDGBuilder& GraphBuilder,
 	/* Get the global shader map from our scene view */
 	FGlobalShaderMap* GlobalShaderMap = GetGlobalShaderMap(InView.Family->GetFeatureLevel());
 
-	/* Create the worley noise texture if it hasn't been created yet */
-	const bool FirstTime = WorleyTexture.IsValid() == false;
+	/* Create the noise texture if it hasn't been created yet */
+	const bool FirstTime = AlligatorNoiseTexture.IsValid() == false;
 	if (FirstTime) {
-		// Create 3D texture description
-		FRHITextureCreateDesc Desc = FRHITextureCreateDesc::Create3D(TEXT("Worley Texture"))
+		/* Create the noise texture */
+		FRHITextureCreateDesc Desc = FRHITextureCreateDesc::Create3D(TEXT("Alligator Texture"))
 			.SetExtent(512, 512)
 			.SetDepth(512)
 			.SetFormat(PF_R8)
 			.SetFlags(ETextureCreateFlags::UAV | ETextureCreateFlags::ShaderResource)
 			.SetInitialState(ERHIAccess::UAVCompute);
-
-		// Create the texture
-		WorleyTexture = RHICreateTexture(Desc);
+		AlligatorNoiseTexture = RHICreateTexture(Desc);
 	}
 
-	FRDGTextureRef NoiseTexture = GraphBuilder.RegisterExternalTexture(CreateRenderTarget(WorleyTexture, TEXT("Worley Texture")));
+	FRDGTextureRef NoiseTexture = GraphBuilder.RegisterExternalTexture(CreateRenderTarget(AlligatorNoiseTexture, TEXT("Alligator Texture")));
 
-	/* Fill in the worley noise texture if it hasn't been filled yet */
+	/* Fill in the noise texture if it hasn't been filled yet */
 	if (FirstTime) {
-		RDG_EVENT_SCOPE(GraphBuilder, "Vapor Noise Generation");
+		RDG_EVENT_SCOPE(GraphBuilder, "Alligator Noise Generation");
 
 		/* Allocate and fill-in the shader pass parameters */
 		FNoiseShader::FParameters* PassParameters = GraphBuilder.AllocParameters<FNoiseShader::FParameters>();
@@ -111,7 +109,7 @@ void FVaporExtension::PrePostProcessPass_RenderThread(FRDGBuilder& GraphBuilder,
 		TShaderMapRef<FNoiseShader> ComputeShader(GlobalShaderMap);
 
 		FComputeShaderUtils::AddPass(GraphBuilder,
-			RDG_EVENT_NAME("Worley Noise Generation Pass"),
+			RDG_EVENT_NAME("Alligator Noise Generation Pass"),
 			ComputeShader, PassParameters, DispatchCount);
 	}
 
@@ -147,7 +145,7 @@ void FVaporExtension::PrePostProcessPass_RenderThread(FRDGBuilder& GraphBuilder,
 		PassParameters->Cloud = TUniformBufferRef<FCloudscapeRenderData>::CreateUniformBufferImmediate(RenderData, EUniformBufferUsage::UniformBuffer_SingleFrame);
 	}
 	PassParameters->View = InView.ViewUniformBuffer;
-	PassParameters->WorleyNoise = GraphBuilder.CreateSRV(FRDGTextureSRVDesc(NoiseTexture));
+	PassParameters->AlligatorNoise = GraphBuilder.CreateSRV(FRDGTextureSRVDesc(NoiseTexture));
 	PassParameters->SceneColor = SceneColor;
 	PassParameters->SceneDepth = SceneDepth;
 	PassParameters->Output = GraphBuilder.CreateUAV(FRDGTextureUAVDesc(OutputTexture));

@@ -10,8 +10,6 @@ static const float SPHERE_SIZE = 100.0; // cm
 // Cloud Parameters
 ConstantBuffer<CloudParameters> Cloud;
 
-Texture3D<float> WorleyNoise;
-
 // Scene Textures
 Texture2D<float3> SceneColor;
 Texture2D<float> SceneDepth;

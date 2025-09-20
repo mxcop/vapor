@@ -3,6 +3,9 @@
 
 static const float CLOUD_BOUNDS = 100.0;
 
+static const float NOISE_FREQ = 0.01;
+Texture3D<float> AlligatorNoise;
+
 /// Cloud Volume Sample.
 struct CloudSample {
     float Value;
@@ -53,10 +56,11 @@ CloudSample SampleCloud(ConstantBuffer<CloudParameters> Cloud, const float3 UVW)
         const float SDist = NormSDist * length(float3(CLOUD_BOUNDS, CLOUD_BOUNDS, CLOUD_BOUNDS) * 2.0);
         return CloudSample::Outside(SDist);
     }
-        
+    
     // We're inside the volume, so we fetch the density and return it instead.
     const float Density = Cloud.DensityTexture.Sample(GlobalBilinearClampedSampler, UVW);
-    return CloudSample::Inside(Density * Cloud.Density);
+    const float Erosion = AlligatorNoise.Sample(GlobalBilinearWrappedSampler, UVW * NOISE_FREQ);
+    return CloudSample::Inside(max(Density - (Erosion * Erosion), 0.0) * Cloud.Density);
 }
 
 /// Get the entry distance of a ray with an AABB.
