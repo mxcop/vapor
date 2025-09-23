@@ -6,6 +6,7 @@
 
 /* OpenVDB Includes */
 THIRD_PARTY_INCLUDES_START
+__pragma(warning(disable: 4706))
 #undef check /* <- Otherwise we cannot compile... */
 #include "openvdb/openvdb.h"
 #include "openvdb/Grid.h"
@@ -55,11 +56,24 @@ constexpr uint32 VTEX_X = 64;
 constexpr uint32 VTEX_Y = 64;
 constexpr uint32 VTEX_Z = 64;
 
-/** @brief Re-sample a VDB float grid as density field. */
-void ResampleDensityField(UVolumeTexture& Output, openvdb::FloatGrid& Input) {
+/** @brief Remap an input value in an input range to an output range. */
+float Remap(float Value, float InMin, float InMax, float OutMin, float OutMax) {
+	const float Range = InMax - InMin;
+	const float Norm = (Value - InMin) / Range;
+	const float Clamped = (Norm < 0.0f) ? 0.0f : (Norm > 1.0f) ? 1.0f : Norm;
+	return OutMin + (Clamped * (OutMax - OutMin));
+}
+
+struct StepInfo {
+	openvdb::Vec3d Min;
+	double StepSize;
+};
+
+/** @brief Calculate the grid step size for re-sampling. */
+StepInfo GridStepInfo(const openvdb::FloatGrid& Grid) {
 	/* Get the extent of the grid in world space */
-	const openvdb::math::Transform GridTransform = Input.transform();
-	const openvdb::CoordBBox AABB = Input.evalActiveVoxelBoundingBox();
+	const openvdb::math::Transform GridTransform = Grid.transform();
+	const openvdb::CoordBBox AABB = Grid.evalActiveVoxelBoundingBox();
 	const openvdb::Vec3d GridMin = GridTransform.indexToWorld(AABB.min());
 	const openvdb::Vec3d GridExtent = GridTransform.indexToWorld(AABB.max()) - GridMin;
 
@@ -68,16 +82,17 @@ void ResampleDensityField(UVolumeTexture& Output, openvdb::FloatGrid& Input) {
 	const double StepY = GridExtent.y() / VTEX_Y;
 	const double StepZ = GridExtent.z() / VTEX_Z;
 	const double StepSize = std::max(std::max(StepX, StepY), StepZ);
+	return StepInfo(GridMin, StepSize);
+}
 
-	/* Find the min and max density in the grid */
-	float MinDensity = 0.0f;
-	float MaxDensity = 0.0f;
-	Input.evalMinMax(MinDensity, MaxDensity);
-	const float DensityRange = MaxDensity - MinDensity;
+/** @brief Re-sample a VDB float grid as density field. */
+void ResampleDensityField(UVolumeTexture& Output, openvdb::FloatGrid& Input) {
+	/* Calculate the step size */
+	const StepInfo StepInfo = GridStepInfo(Input);
 
 	/* Pre-filter the input grid for down-sampling */
 	openvdb::tools::Filter<openvdb::FloatGrid> Filter(Input);
-	Filter.gaussian(StepSize, 1);
+	Filter.gaussian(StepInfo.StepSize, 1);
 
 	/* Create a grid sampler and lock the volume texture data */
 	openvdb::tools::GridSampler<openvdb::FloatGrid, openvdb::tools::BoxSampler> sampler(Input);
@@ -88,18 +103,17 @@ void ResampleDensityField(UVolumeTexture& Output, openvdb::FloatGrid& Input) {
 		for (int32 y = 0; y < VTEX_Y; ++y) {
 			for (int32 x = 0; x < VTEX_X; ++x) {
 				const openvdb::Vec3d WorldPos(
-					GridMin.x() + x * StepSize,
-					GridMin.y() + y * StepSize,
-					GridMin.z() + z * StepSize
+					StepInfo.Min.x() + x * StepInfo.StepSize,
+					StepInfo.Min.y() + y * StepInfo.StepSize,
+					StepInfo.Min.z() + z * StepInfo.StepSize
 				);
 
 				/* Sample the density grid */
-				const float Density = sampler.wsSample(WorldPos) / DensityRange;
-				const uint8 DensityData = (uint8)(Density * 255.0f);
+				const float Density = sampler.wsSample(WorldPos);
 
 				/* Calculate the texture index and write our density data */
 				const int32 index = x + (y * VTEX_X) + (z * VTEX_X * VTEX_Y);
-				TextureData[index] = DensityData;
+				TextureData[index] = (uint8)Remap(Density, 0.0f, 1.0f, 0.0f, 255.0f);
 			}
 		}
 	}
@@ -120,52 +134,55 @@ void ResampleDensityField(UVolumeTexture& Output, openvdb::FloatGrid& Input) {
 
 /** @brief Re-sample a VDB float grid as signed distance field. */
 void ResampleSignedDistanceField(UVolumeTexture& Output, openvdb::FloatGrid& Input) {
+	/* Calculate the step size */
+	const StepInfo StepInfo = GridStepInfo(Input);
+
+	const openvdb::Vec3d EndPos(
+		StepInfo.Min.x() + VTEX_X * StepInfo.StepSize,
+		StepInfo.Min.y() + VTEX_Y * StepInfo.StepSize,
+		StepInfo.Min.z() + VTEX_Z * StepInfo.StepSize
+	);
+
 	/* Convert the density grid data to a signed distance field */
-	//const openvdb::FloatGrid::Ptr SdfGrid = openvdb::tools::fogToSdf(Input, 0.01f);
+	openvdb::Vec3d EndIdx = Input.worldToIndex(EndPos);
+	auto accessor = Input.getAccessor();
 
-	/* Get the extent of the grid in world space */
-	//const openvdb::math::Transform GridTransform = SdfGrid->transform();
-	//const openvdb::CoordBBox AABB = SdfGrid->evalActiveVoxelBoundingBox();
-	//const openvdb::Vec3d GridMin = GridTransform.indexToWorld(AABB.min());
-	//const openvdb::Vec3d GridExtent = GridTransform.indexToWorld(AABB.max()) - GridMin;
+	openvdb::Coord coord;
+	for (coord.x() = StepInfo.Min.x(); coord.x() <= EndIdx.x(); ++coord.x()) {
+		for (coord.y() = StepInfo.Min.y(); coord.y() <= EndIdx.y(); ++coord.y()) {
+			for (coord.z() = StepInfo.Min.z(); coord.z() <= EndIdx.z(); ++coord.z()) {
+				if (!accessor.isValueOn(coord)) {
+					accessor.setValue(coord, 0.0f);
+				}
+			}
+		}
+	}
 
-	/* Calculate the step size along each axis */
-	//const double StepX = GridExtent.x() / VTEX_X;
-	//const double StepY = GridExtent.y() / VTEX_Y;
-	//const double StepZ = GridExtent.z() / VTEX_Z;
-	//const double StepSize = std::max(std::max(StepX, StepY), StepZ);
-	//const double MaxDistance = FVector3d(GridExtent.x(), GridExtent.y(), GridExtent.z()).Length();
-
-	/* Find the min and max density in the grid */
-	//float MinDensity = 0.0f;
-	//float MaxDensity = 0.0f;
-	//SdfGrid->evalMinMax(MinDensity, MaxDensity);
-	//const float DensityRange = MaxDensity - MinDensity;
-
+	const openvdb::FloatGrid::Ptr SdfGrid = openvdb::tools::fogToSdf(Input, 0.0001f);
+	
 	/* Create a grid sampler and lock the volume texture data */
-	//openvdb::tools::GridSampler<openvdb::FloatGrid, openvdb::tools::QuadraticSampler> sampler(*SdfGrid);
-	uint8* TextureData = Output.Source.LockMip(0);
+	openvdb::tools::GridSampler<openvdb::FloatGrid, openvdb::tools::QuadraticSampler> sampler(*SdfGrid);
+	uint16* TextureData = (uint16*)Output.Source.LockMip(0);
 
 	/* Re-sample the SDF grid */
-	//for (int32 z = 0; z < VTEX_Z; ++z) {
-	//	for (int32 y = 0; y < VTEX_Y; ++y) {
-	//		for (int32 x = 0; x < VTEX_X; ++x) {
-	//			const openvdb::Vec3d WorldPos(
-	//				GridMin.x() + x * StepSize,
-	//				GridMin.y() + y * StepSize,
-	//				GridMin.z() + z * StepSize
-	//			);
+	for (int32 z = 0; z < VTEX_Z; ++z) {
+		for (int32 y = 0; y < VTEX_Y; ++y) {
+			for (int32 x = 0; x < VTEX_X; ++x) {
+				const openvdb::Vec3d WorldPos(
+					StepInfo.Min.x() + x * StepInfo.StepSize,
+					StepInfo.Min.y() + y * StepInfo.StepSize,
+					StepInfo.Min.z() + z * StepInfo.StepSize
+				);
 
-	//			/* Sample the SDF grid */
-	//			const double Distance = sampler.wsSample(WorldPos);
-	//			const double NormalizedDistance = Distance / MaxDistance; /* (-1..1) */
+				/* Sample the SDF grid */
+				const float SDF = sampler.wsSample(WorldPos);
 
-	//			/* Calculate the texture index and write our distance data */
-	//			const int32 index = x + (y * VTEX_X) + (z * VTEX_X * VTEX_Y);
-	//			TextureData[index] = std::max(0.0, NormalizedDistance);
-	//		}
-	//	}
-	//}
+				/* Calculate the texture index and write our distance data */
+				const int32 index = x + (y * VTEX_X) + (z * VTEX_X * VTEX_Y);
+				TextureData[index] = (uint16)Remap(SDF, -256.0f, 4096.0f, 0.0f, 65535.0f);
+			}
+		}
+	}
 
 	/* Unlock the volume texture data */
 	Output.Source.UnlockMip(0);

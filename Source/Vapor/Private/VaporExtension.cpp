@@ -119,30 +119,30 @@ void FVaporExtension::BeginRenderViewFamily(FSceneViewFamily& ViewFamily) {
 				.SetInitialState(ERHIAccess::UAVCompute);
 			PathDensityTexture = RHICreateTexture(Desc);
 
-			/* Get the global shader map from our scene view */
-			FGlobalShaderMap* GlobalShaderMap = GetGlobalShaderMap(GMaxRHIFeatureLevel);
+			///* Get the global shader map from our scene view */
+			//FGlobalShaderMap* GlobalShaderMap = GetGlobalShaderMap(GMaxRHIFeatureLevel);
 
-			FRDGTextureRef SHTexture = GraphBuilder.RegisterExternalTexture(CreateRenderTarget(PathDensityTexture, TEXT("Path Density Texture")));
+			//FRDGTextureRef SHTexture = GraphBuilder.RegisterExternalTexture(CreateRenderTarget(PathDensityTexture, TEXT("Path Density Texture")));
 
-			/* Allocate and fill-in the shader pass parameters */
-			FBakeShader::FParameters* PassParameters = GraphBuilder.AllocParameters<FBakeShader::FParameters>();
-			PassParameters->OutputSH = GraphBuilder.CreateUAV(FRDGTextureUAVDesc(SHTexture));
-			{
-				FScopeLock Lock(&RenderDataLock);
-				RenderData.DensityTexture = GraphBuilder.RegisterExternalTexture(CreateRenderTarget(DensityTexture->GetTextureRHI(), TEXT("Density Texture")));
-				RenderData.SDFTexture = GraphBuilder.RegisterExternalTexture(CreateRenderTarget(SDFTexture->GetTextureRHI(), TEXT("SDF Texture")));
-				PassParameters->Cloud = TUniformBufferRef<FCloudscapeRenderData>::CreateUniformBufferImmediate(RenderData, EUniformBufferUsage::UniformBuffer_SingleFrame);
-			}
+			///* Allocate and fill-in the shader pass parameters */
+			//FBakeShader::FParameters* PassParameters = GraphBuilder.AllocParameters<FBakeShader::FParameters>();
+			//PassParameters->OutputSH = GraphBuilder.CreateUAV(FRDGTextureUAVDesc(SHTexture));
+			//{
+			//	FScopeLock Lock(&RenderDataLock);
+			//	RenderData.DensityTexture = GraphBuilder.RegisterExternalTexture(CreateRenderTarget(DensityTexture->GetTextureRHI(), TEXT("Density Texture")));
+			//	RenderData.SDFTexture = GraphBuilder.RegisterExternalTexture(CreateRenderTarget(SDFTexture->GetTextureRHI(), TEXT("SDF Texture")));
+			//	PassParameters->Cloud = TUniformBufferRef<FCloudscapeRenderData>::CreateUniformBufferImmediate(RenderData, EUniformBufferUsage::UniformBuffer_SingleFrame);
+			//}
 
-			/* Calculate the group count based on the viewport size */
-			const FIntVector DispatchCount = FIntVector(512 / 4, 512 / 4, 512 / 4); // FComputeShaderUtils::GetGroupCount(FIntVector(512, 512, 512), FComputeShaderUtils::kGolden2DGroupSize);
+			///* Calculate the group count based on the viewport size */
+			//const FIntVector DispatchCount = FIntVector(512 / 4, 512 / 4, 512 / 4); // FComputeShaderUtils::GetGroupCount(FIntVector(512, 512, 512), FComputeShaderUtils::kGolden2DGroupSize);
 
-			/* Load our custom shader from the global shader map */
-			TShaderMapRef<FBakeShader> ComputeShader(GlobalShaderMap);
+			///* Load our custom shader from the global shader map */
+			//TShaderMapRef<FBakeShader> ComputeShader(GlobalShaderMap);
 
-			FComputeShaderUtils::AddPass(GraphBuilder,
-				RDG_EVENT_NAME("Path Density Integration Pass"),
-				ComputeShader, PassParameters, DispatchCount);
+			//FComputeShaderUtils::AddPass(GraphBuilder,
+			//	RDG_EVENT_NAME("Path Density Integration Pass"),
+			//	ComputeShader, PassParameters, DispatchCount);
 			GraphBuilder.Execute();
 		});
 	}
