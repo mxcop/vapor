@@ -64,52 +64,65 @@ float Remap(float Value, float InMin, float InMax, float OutMin, float OutMax) {
 	return OutMin + (Clamped * (OutMax - OutMin));
 }
 
-struct StepInfo {
-	openvdb::Vec3d Min;
-	double StepSize;
-};
-
-/** @brief Calculate the grid step size for re-sampling. */
-StepInfo GridStepInfo(const openvdb::FloatGrid& Grid) {
-	/* Get the extent of the grid in world space */
-	const openvdb::math::Transform GridTransform = Grid.transform();
+openvdb::FloatGrid::Ptr ResampleGrid(const openvdb::FloatGrid& Grid, const uint32 X, const uint32 Y, const uint32 Z) {
+	/* Calculate the bounds of the grid in world-space */
 	const openvdb::CoordBBox AABB = Grid.evalActiveVoxelBoundingBox();
-	const openvdb::Vec3d GridMin = GridTransform.indexToWorld(AABB.min());
-	const openvdb::Vec3d GridExtent = GridTransform.indexToWorld(AABB.max()) - GridMin;
+	const openvdb::Vec3d GridMin = Grid.indexToWorld(AABB.min());
+	const openvdb::Vec3d GridMax = Grid.indexToWorld(AABB.max());
+	const openvdb::Vec3d GridExtent = GridMax - GridMin;
 
-	/* Calculate the step size along each axis */
-	const double StepX = GridExtent.x() / VTEX_X;
-	const double StepY = GridExtent.y() / VTEX_Y;
-	const double StepZ = GridExtent.z() / VTEX_Z;
-	const double StepSize = std::max(std::max(StepX, StepY), StepZ);
-	return StepInfo(GridMin, StepSize);
-}
+	/* Find the step size to use for resampling the grid */
+	const openvdb::Vec3d StepSizes = GridExtent / openvdb::Vec3d(X, Y, Z);
+	const double StepSize = std::max(std::max(StepSizes.x(), StepSizes.y()), StepSizes.z());
 
-/** @brief Re-sample a VDB float grid as density field. */
-void ResampleDensityField(UVolumeTexture& Output, openvdb::FloatGrid& Input) {
-	/* Calculate the step size */
-	const StepInfo StepInfo = GridStepInfo(Input);
+	/* Create the new resampled grid */
+	openvdb::FloatGrid::Ptr Resampled = openvdb::FloatGrid::create(0.0f);
+	openvdb::FloatGrid::Accessor Accessor = Resampled->getAccessor();
 
 	/* Pre-filter the input grid for down-sampling */
-	openvdb::tools::Filter<openvdb::FloatGrid> Filter(Input);
-	Filter.gaussian(StepInfo.StepSize, 1);
+	openvdb::FloatGrid::Ptr Filtered = Grid.deepCopy();
+	if (StepSize > 1.0f) {
+		openvdb::tools::Filter<openvdb::FloatGrid> Filter(*Filtered);
+		Filter.gaussian(StepSize, 1);
+	}
 
-	/* Create a grid sampler and lock the volume texture data */
-	openvdb::tools::GridSampler<openvdb::FloatGrid, openvdb::tools::BoxSampler> sampler(Input);
+	/* Create a box grid sampler for the input grid */
+	const openvdb::tools::GridSampler<openvdb::FloatGrid, openvdb::tools::BoxSampler> sampler(*Filtered);
+
+	/* Resample the pre-filtered grid */
+	for (uint32 z = 0; z < Z; ++z) {
+		for (uint32 y = 0; y < Y; ++y) {
+			for (uint32 x = 0; x < X; ++x) {
+				/* Sample the pre-filtered grid */
+				const float Value = sampler.wsSample(openvdb::Vec3d(
+					GridMin.x() + x * StepSize, 
+					GridMin.y() + y * StepSize, 
+					GridMin.z() + z * StepSize
+				));
+
+				/* Set the value inside our resampled grid */
+				Accessor.setValue(openvdb::Coord(x, y, z), Value);
+			}
+		}
+	}
+
+	return Resampled;
+}
+
+void CreateDensityTexture(UVolumeTexture& Output, const openvdb::FloatGrid& DensityGrid) {
+	/* Initialize the volume texture */
+	Output.Source.Init(VTEX_X, VTEX_Y, VTEX_Z, 1, TSF_G8, nullptr);
+
+	/* Create a grid accessor and lock the volume texture data */
+	const openvdb::FloatGrid::ConstAccessor Accessor = DensityGrid.getConstAccessor();
 	uint8* TextureData = Output.Source.LockMip(0);
 
-	/* Re-sample the density grid */
+	/* Move the density data into a texture */
 	for (int32 z = 0; z < VTEX_Z; ++z) {
 		for (int32 y = 0; y < VTEX_Y; ++y) {
 			for (int32 x = 0; x < VTEX_X; ++x) {
-				const openvdb::Vec3d WorldPos(
-					StepInfo.Min.x() + x * StepInfo.StepSize,
-					StepInfo.Min.y() + y * StepInfo.StepSize,
-					StepInfo.Min.z() + z * StepInfo.StepSize
-				);
-
 				/* Sample the density grid */
-				const float Density = sampler.wsSample(WorldPos);
+				const float Density = Accessor.getValue(openvdb::Coord(x, y, z));
 
 				/* Calculate the texture index and write our density data */
 				const int32 index = x + (y * VTEX_X) + (z * VTEX_X * VTEX_Y);
@@ -132,52 +145,25 @@ void ResampleDensityField(UVolumeTexture& Output, openvdb::FloatGrid& Input) {
 	Output.UpdateResource();
 }
 
-/** @brief Re-sample a VDB float grid as signed distance field. */
-void ResampleSignedDistanceField(UVolumeTexture& Output, openvdb::FloatGrid& Input) {
-	/* Calculate the step size */
-	const StepInfo StepInfo = GridStepInfo(Input);
-
-	const openvdb::Vec3d EndPos(
-		StepInfo.Min.x() + VTEX_X * StepInfo.StepSize,
-		StepInfo.Min.y() + VTEX_Y * StepInfo.StepSize,
-		StepInfo.Min.z() + VTEX_Z * StepInfo.StepSize
-	);
+void CreateSDFTexture(UVolumeTexture& Output, const openvdb::FloatGrid& DensityGrid) {
+	/* Initialize the volume texture */
+	Output.Source.Init(VTEX_X, VTEX_Y, VTEX_Z, 1, TSF_G16, nullptr);
 
 	/* Convert the density grid data to a signed distance field */
-	openvdb::Vec3d EndIdx = Input.worldToIndex(EndPos);
-	auto accessor = Input.getAccessor();
+	const openvdb::FloatGrid::Ptr SdfGrid = openvdb::tools::fogToSdf(DensityGrid, 0.0001f);
 
-	openvdb::Coord coord;
-	for (coord.x() = StepInfo.Min.x(); coord.x() <= EndIdx.x(); ++coord.x()) {
-		for (coord.y() = StepInfo.Min.y(); coord.y() <= EndIdx.y(); ++coord.y()) {
-			for (coord.z() = StepInfo.Min.z(); coord.z() <= EndIdx.z(); ++coord.z()) {
-				if (!accessor.isValueOn(coord)) {
-					accessor.setValue(coord, 0.0f);
-				}
-			}
-		}
-	}
-
-	const openvdb::FloatGrid::Ptr SdfGrid = openvdb::tools::fogToSdf(Input, 0.0001f);
-	
-	/* Create a grid sampler and lock the volume texture data */
-	openvdb::tools::GridSampler<openvdb::FloatGrid, openvdb::tools::QuadraticSampler> sampler(*SdfGrid);
+	/* Create a grid accessor and lock the volume texture data */
+	const openvdb::FloatGrid::ConstAccessor Accessor = SdfGrid->getConstAccessor();
 	uint16* TextureData = (uint16*)Output.Source.LockMip(0);
 
-	/* Re-sample the SDF grid */
+	/* Move the SDF data into a texture */
 	for (int32 z = 0; z < VTEX_Z; ++z) {
 		for (int32 y = 0; y < VTEX_Y; ++y) {
 			for (int32 x = 0; x < VTEX_X; ++x) {
-				const openvdb::Vec3d WorldPos(
-					StepInfo.Min.x() + x * StepInfo.StepSize,
-					StepInfo.Min.y() + y * StepInfo.StepSize,
-					StepInfo.Min.z() + z * StepInfo.StepSize
-				);
-
 				/* Sample the SDF grid */
-				const float SDF = sampler.wsSample(WorldPos);
+				const float SDF = Accessor.getValue(openvdb::Coord(x, y, z));
 
-				/* Calculate the texture index and write our distance data */
+				/* Calculate the texture index and write our SDF data */
 				const int32 index = x + (y * VTEX_X) + (z * VTEX_X * VTEX_Y);
 				TextureData[index] = (uint16)Remap(SDF, -256.0f, 4096.0f, 0.0f, 65535.0f);
 			}
@@ -245,16 +231,15 @@ UVaporCloud* UCloudscapeFactory::CreateVolumeTextureFromVDB(const FString& Filen
 		*FString::Printf(TEXT("%s_SignedDistanceField"), *InName.ToString()));
 		
 	/* Get the source volume textures */
-	UVolumeTexture& DensityField = *CloudData->DensityField;
-	UVolumeTexture& SignedDistanceField = *CloudData->SignedDistanceField;
+	UVolumeTexture& DensityTexture = *CloudData->DensityField;
+	UVolumeTexture& SDFTexture = *CloudData->SignedDistanceField;
 
-	/* Initialize the volume textures */
-	DensityField.Source.Init(VTEX_X, VTEX_Y, VTEX_Z, 1, TSF_G8, nullptr);
-	SignedDistanceField.Source.Init(VTEX_X, VTEX_Y, VTEX_Z, 1, TSF_G16, nullptr);
+	/* Resample the density field */
+	const openvdb::FloatGrid::Ptr ResampledGrid = ResampleGrid(*DensityGrid, VTEX_X, VTEX_Y, VTEX_Z);
 
-	/* Re-sample the density field */
-	ResampleDensityField(DensityField, *DensityGrid);
-	ResampleSignedDistanceField(SignedDistanceField, *DensityGrid);
+	/* Create the volume textures from the resampled density field */
+	CreateDensityTexture(DensityTexture, *ResampledGrid);
+	CreateSDFTexture(SDFTexture, *ResampledGrid);
 
 	File.close(); /* Finally close the VDB file, and return */
 	return CloudData;
