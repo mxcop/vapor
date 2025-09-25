@@ -53,37 +53,37 @@ float HenyeyGreenstein(float VdotL, float G) {
 
 /// Trace the scene, find out how much light is being absorped.
 float3 TraceAbsorption(const float3 Origin, const float3 Dir, const float PathDensityThreshold) {
-    //// Intersect the bounds of the volume, return early if we miss.
-    //const float2 BoundsIntersection = RayAABB(Origin, Dir, Cloud.Position - CLOUD_BOUNDS, Cloud.Position + CLOUD_BOUNDS);
+    // Intersect the bounds of the volume, return early if we miss.
+    const float2 BoundsIntersection = RayAABB(Origin, Dir, Cloud.Position - CLOUD_BOUNDS, Cloud.Position + CLOUD_BOUNDS);
     
-    //// Traversal variables.
-    //float Distance = max(0.0, BoundsIntersection.x);
-    //float PathDensity = 0.0;
-    //float StepSize = Cloud.InnerStepSize;
+    // Traversal variables.
+    float Distance = max(0.0, BoundsIntersection.x);
+    float PathDensity = 0.0;
+    float StepSize = Cloud.InnerStepSize;
     
-    //for (uint s = 0; s < MAX_INDIRECT_STEPS; ++s) {
-    //    if (Distance >= BoundsIntersection.y) break;
+    for (uint s = 0; s < MAX_INDIRECT_STEPS; ++s) {
+        if (Distance >= BoundsIntersection.y) break;
         
-    //    // Sample the volume.
-    //    const float3 SamplePos = Origin + Dir * Distance;
-    //    const CloudSample Sample = SampleVolume(SamplePos);
+        // Sample the volume.
+        const float3 SamplePos = Origin + Dir * Distance;
+        const CloudSample Sample = SampleVolume(SamplePos);
         
-    //    // No work to be done outside the volume, just keep stepping.
-    //    if (Sample.IsOutside()) {
-    //        Distance += max(Cloud.MinStepSize, Sample.SDist()); // Move along the ray to the next location.
-    //        continue;
-    //    }
-    //    Distance += StepSize;
+        // No work to be done outside the volume, just keep stepping.
+        if (Sample.IsOutside()) {
+            Distance += max(Cloud.MinStepSize, Sample.SDist()); // Move along the ray to the next location.
+            continue;
+        }
+        Distance += StepSize;
         
-    //    // We're inside the volume, accumulate density.
-    //    PathDensity += Sample.Density() * StepSize;
-    //    if (PathDensity > PathDensityThreshold) break;
-    //}
+        // We're inside the volume, accumulate density.
+        PathDensity += Sample.Density() * StepSize;
+        if (PathDensity > PathDensityThreshold) break;
+    }
     
     // Sample path density from baked spherical harmonics.
-    const float3 UVW = (Origin - Cloud.Position) / CLOUD_BOUNDS * 0.5 + 0.5;
-    const float4 SH1 = PathDensityTexture.Sample(GlobalBilinearClampedSampler, UVW);
-    const float PathDensity = Cloud.Density * (SH1.x + dot(SH1.yzw, Dir) * 3.0);
+    //const float3 UVW = (Origin - Cloud.Position) / CLOUD_BOUNDS * 0.5 + 0.5;
+    //const float4 SH1 = PathDensityTexture.Sample(GlobalBilinearClampedSampler, UVW);
+    //const float PathDensity = Cloud.Density * (SH1.x + dot(SH1.yzw, Dir) * 3.0);
     
     // Beer's Law <https://en.wikipedia.org/wiki/Beer%E2%80%93Lambert_law>
     const float3 Absorption = saturate(exp(-Cloud.Absorption * PathDensity));

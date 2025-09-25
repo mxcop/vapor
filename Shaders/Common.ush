@@ -2,6 +2,7 @@
 #include "/Engine/Private/Common.ush"
 
 static const float CLOUD_BOUNDS = 100.0;
+static const float UNITS_PER_VOXEL = (CLOUD_BOUNDS * 2.0) / 64.0;
 
 //static const float NOISE_FREQ = 0.01;
 //Texture3D<float> AlligatorNoise;
@@ -45,21 +46,26 @@ struct CloudParameters {
     Texture3D<float> SDFTexture;
 };
 
+/// Remap an input value in an input range to an output range.
+float Remap(const float Value, const float InMin, const float InMax, const float OutMin, const float OutMax) {
+    const float Range = InMax - InMin;
+    const float Norm = (Value - InMin) / Range;
+    const float Clamped = (Norm < 0.0) ? 0.0 : (Norm > 1.0) ? 1.0 : Norm;
+    return OutMin + (Clamped * (OutMax - OutMin));
+}
+
 /// Sample the cloud.
 CloudSample SampleCloud(ConstantBuffer<CloudParameters> Cloud, const float3 UVW) {
-    // Sample the signed distance field.
-    //const float NormSDist = Cloud.SDFTexture.Sample(GlobalBilinearClampedSampler, UVW);
-        
+    // Sample the Signed Distance Field.
+    // The SDF is stored from -256 to 4096 in a UNorm texture encoded in voxel-space.
+    const float NormSDist = Cloud.SDFTexture.Sample(GlobalBilinearClampedSampler, UVW);
+    const float SDist = (NormSDist * 4352.0 - 256.0) * UNITS_PER_VOXEL;
+    
     // If the distance is above zero, we're outside the cloud, return the signed distance.
-    //if (NormSDist > 0.0) {
-    //    // Convert the normalized signed distance to world-space.
-    //    const float SDist = NormSDist * length(float3(CLOUD_BOUNDS, CLOUD_BOUNDS, CLOUD_BOUNDS) * 2.0);
-    //    return CloudSample::Outside(SDist);
-    //}
+    if (SDist > 0.0) return CloudSample::Outside(SDist);
     
     // We're inside the volume, so we fetch the density and return it instead.
     const float Density = Cloud.DensityTexture.Sample(GlobalBilinearClampedSampler, UVW);
-    if (Density <= 0.0) return CloudSample::Outside(3.0);
     return CloudSample::Inside(Density * Cloud.Density);
     // const float Erosion = AlligatorNoise.Sample(GlobalBilinearWrappedSampler, UVW * NOISE_FREQ);
     // return CloudSample::Inside(max(Density - (Erosion * Erosion), 0.0) * Cloud.Density);
