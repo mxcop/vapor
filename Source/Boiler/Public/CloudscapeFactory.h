@@ -5,7 +5,7 @@
 #include "CoreMinimal.h"
 #include "Factories/Factory.h"
 #include "EditorReimportHandler.h"
-#include "VaporCloud.h"
+#include "Vapor/Public/VaporCloud.h"
 
 #include "CloudscapeFactory.generated.h"
 

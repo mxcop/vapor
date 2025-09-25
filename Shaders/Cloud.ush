@@ -1,0 +1,64 @@
+#include "/Engine/Public/Platform.ush"
+#include "/Engine/Private/Common.ush"
+
+static const float CLOUD_BOUNDS = 100.0;
+static const float UNITS_PER_VOXEL = (CLOUD_BOUNDS * 2.0) / 64.0;
+
+//static const float NOISE_FREQ = 0.01;
+//Texture3D<float> AlligatorNoise;
+
+/// Sample taken from a cloud.
+struct CloudSample {
+    float Value;
+    
+    /// Create a cloud sample which resides outside the cloud.
+    static CloudSample Outside(const float SDist) { return (CloudSample)SDist; }
+    /// Create a cloud sample which resides inside the cloud.
+    static CloudSample Inside(const float Density) { return (CloudSample)(-Density); }
+    
+    /// Returns true if this sample is outside the volume.
+    inline bool IsOutside() { return Value > 0.0; }
+    /// Returns the density of the cloud for this sample. (if `IsOutside() == false`)
+    inline float Density() { return -Value; }
+    /// Returns the signed distance to the cloud for this sample. (if `IsOutside() == true`)
+    inline float SDist() { return Value; }
+};
+
+/// Collection of data required to render a cloud.
+struct CloudInstance {
+    // Volume Data
+    float3 Position;
+    float3 Absorption;
+    float Density;
+    
+    // Light Data
+    float3 SunDir;
+    float3 SunLuminance;
+    
+    // Performance
+    float MinStepSize;
+    float InnerStepSize;
+    float StepSizeMult;
+    float ExtinctionThreshold;
+    
+    // Textures
+    Texture3D<float> DensityTexture;
+    Texture3D<float> SDFTexture;
+};
+
+/// Sample the cloud.
+CloudSample SampleCloud(ConstantBuffer<CloudInstance> Cloud, const float3 UVW) {
+    // Sample the Signed Distance Field.
+    // The SDF is stored from -256 to 4096 in a UNorm texture encoded in voxel-space.
+    const float NormSDist = Cloud.SDFTexture.Sample(GlobalBilinearClampedSampler, UVW);
+    const float SDist = (NormSDist * 4352.0 - 256.0) * UNITS_PER_VOXEL;
+    
+    // If the distance is above zero, we're outside the cloud, return the signed distance.
+    if (SDist > 0.0) return CloudSample::Outside(SDist);
+    
+    // We're inside the volume, so we fetch the density and return it instead.
+    const float Density = Cloud.DensityTexture.Sample(GlobalBilinearClampedSampler, UVW);
+    return CloudSample::Inside(Density * Cloud.Density);
+    // const float Erosion = AlligatorNoise.Sample(GlobalBilinearWrappedSampler, UVW * NOISE_FREQ);
+    // return CloudSample::Inside(max(Density - (Erosion * Erosion), 0.0) * Cloud.Density);
+}

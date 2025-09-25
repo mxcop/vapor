@@ -1,4 +1,5 @@
 #include "Common.ush"
+#include "Cloud.ush"
 
 // Ray Marching Parameters
 static const uint MAX_DIRECT_STEPS = 256;
@@ -8,7 +9,7 @@ static const uint MAX_INDIRECT_STEPS = 256;
 static const float SPHERE_SIZE = 100.0; // cm
 
 // Cloud Parameters
-ConstantBuffer<CloudParameters> Cloud;
+ConstantBuffer<CloudInstance> Cloud;
 
 static const float NOISE_FREQ = 0.01;
 Texture3D<float> AlligatorNoise;

@@ -76,7 +76,3 @@ DerivedDataCache/*
 # Specific binary and intermediate files
 Binaries/*
 Intermediate/*
-
-# Usually very large volumetric data files
-# Keep these local for now
-*.vdb

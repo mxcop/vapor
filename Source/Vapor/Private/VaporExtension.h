@@ -29,6 +29,8 @@ class FVaporExtension : public FSceneViewExtensionBase {
 	FTextureResource* SDFTexture = nullptr;
 	FCriticalSection RenderDataLock;
 
+	class UVolumeTexture* NoiseDataTexture;
+
 	// Alligator Noise Texture
 	FTextureRHIRef AlligatorNoiseTexture;
 

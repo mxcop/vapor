@@ -1,9 +1,10 @@
 #include "Common.ush"
+#include "Cloud.ush"
 
 static const uint INTEGRATION_STEPS = 256;
 
 // Cloud Parameters
-ConstantBuffer<CloudParameters> Cloud;
+ConstantBuffer<CloudInstance> Cloud;
 
 // Output Spherical Harmonics
 RWTexture3D<float4> OutputSH;

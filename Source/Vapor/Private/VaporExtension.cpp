@@ -9,6 +9,7 @@
 #include "VaporComponent.h"
 #include "Misc/Optional.h"
 #include "VaporCloud.h"
+#include "VDBLoader.h"
 
 IMPLEMENT_GLOBAL_SHADER(FCloudShader, "/Plugins/Vapor/CloudMarchCS.usf", "MainCS", SF_Compute);
 IMPLEMENT_GLOBAL_SHADER(FNoiseShader, "/Plugins/Vapor/NoiseGenCS.usf", "MainCS", SF_Compute);
@@ -36,6 +37,8 @@ enum ERenderTarget {
 
 FVaporExtension::FVaporExtension(const FAutoRegister& AutoRegister) : FSceneViewExtensionBase(AutoRegister) {
 	UE_LOG(LogTemp, Log, TEXT("Vapor: Custom SceneViewExtension registered"));
+
+	NoiseDataTexture = LoadAlligatorNoise();
 
 	/* Fill the noise texture */
 	ENQUEUE_RENDER_COMMAND(AlligatorNoiseGeneration)(
