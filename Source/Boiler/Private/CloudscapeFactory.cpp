@@ -3,7 +3,18 @@
 #if WITH_EDITOR
 
 #include "Engine/VolumeTexture.h"
-#include "OpenVDB.h"
+
+THIRD_PARTY_INCLUDES_START
+__pragma(warning(disable: 4706))
+#undef check /* <- Otherwise we cannot compile... */
+#include "openvdb/openvdb.h"
+#include "openvdb/Grid.h"
+#include "openvdb/tools/Interpolation.h"
+#include "openvdb/tools/FastSweeping.h"
+#include <openvdb/tools/GridTransformer.h>
+#include <openvdb/tools/Filter.h>
+#undef UpdateResource /* <- Windows header included somewhere... */
+THIRD_PARTY_INCLUDES_END
 
 #define LOCTEXT_NAMESPACE "UCloudscapeFactory"
 
@@ -40,8 +51,8 @@ UObject* UCloudscapeFactory::FactoryCreateFile(UClass* InClass, UObject* InParen
 }
 
 /* Volume texture size */
-constexpr uint32 VTEX_X = 64;
-constexpr uint32 VTEX_Y = 64;
+constexpr uint32 VTEX_X = 512;
+constexpr uint32 VTEX_Y = 512;
 constexpr uint32 VTEX_Z = 64;
 
 /** @brief Remap an input value in an input range to an output range. */
@@ -52,16 +63,13 @@ float Remap(float Value, float InMin, float InMax, float OutMin, float OutMax) {
 	return OutMin + (Clamped * (OutMax - OutMin));
 }
 
-openvdb::FloatGrid::Ptr ResampleGrid(const openvdb::FloatGrid& Grid, const uint32 X, const uint32 Y, const uint32 Z) {
-	/* Calculate the bounds of the grid in world-space */
-	const openvdb::CoordBBox AABB = Grid.evalActiveVoxelBoundingBox();
-	const openvdb::Vec3d GridMin = Grid.indexToWorld(AABB.min());
-	const openvdb::Vec3d GridMax = Grid.indexToWorld(AABB.max());
-	const openvdb::Vec3d GridExtent = GridMax - GridMin;
-
+openvdb::FloatGrid::Ptr ResampleGrid(const openvdb::BBoxd& WorldAABB, const openvdb::FloatGrid& Grid, const uint32 X, const uint32 Y, const uint32 Z) {
 	/* Find the step size to use for resampling the grid */
-	const openvdb::Vec3d StepSizes = GridExtent / openvdb::Vec3d(X, Y, Z);
+	const openvdb::Vec3d StepSizes = WorldAABB.extents() / openvdb::Vec3d(X, Z, Y);
 	const double StepSize = std::max(std::max(StepSizes.x(), StepSizes.y()), StepSizes.z());
+
+	UE_LOG(LogTemp, Warning, TEXT("WorldSize: %f, %f, %f"), WorldAABB.extents().x(), WorldAABB.extents().y(), WorldAABB.extents().z());
+	UE_LOG(LogTemp, Warning, TEXT("StepSize: %f, %f, %f"), StepSizes.x(), StepSizes.y(), StepSizes.z());
 
 	/* Create the new resampled grid */
 	openvdb::FloatGrid::Ptr Resampled = openvdb::FloatGrid::create(0.0f);
@@ -83,9 +91,9 @@ openvdb::FloatGrid::Ptr ResampleGrid(const openvdb::FloatGrid& Grid, const uint3
 			for (uint32 x = 0; x < X; ++x) {
 				/* Sample the pre-filtered grid */
 				const float Value = sampler.wsSample(openvdb::Vec3d(
-					GridMin.x() + x * StepSize, 
-					GridMin.y() + y * StepSize, 
-					GridMin.z() + z * StepSize
+					WorldAABB.min().x() + x * StepSizes.x(),
+					WorldAABB.min().y() + z * StepSizes.y(),
+					WorldAABB.min().z() + y * StepSizes.z()
 				));
 
 				/* Set the value inside our resampled grid */
@@ -202,8 +210,15 @@ UVaporCloud* UCloudscapeFactory::CreateVolumeTextureFromVDB(const FString& Filen
 		}
 		UE_LOG(LogTemp, Warning, TEXT("VDB Grid: %s"), UTF8_TO_TCHAR(File.getGrids()->at(i)->getName().c_str()));
 	}
-	BaseGrid->setTransform(openvdb::math::Transform::createLinearTransform());
 	const openvdb::FloatGrid::Ptr DensityGrid = openvdb::gridPtrCast<openvdb::FloatGrid>(BaseGrid);
+
+	/* Find the AABB of all the grids */
+	openvdb::BBoxd WorldAABB = openvdb::BBoxd();
+	for (uint32 i = 0; i < File.getGrids()->size(); ++i) {
+		const openvdb::GridBase::Ptr Grid = File.getGrids()->at(i);
+		const openvdb::CoordBBox AABB = Grid->evalActiveVoxelBoundingBox();
+		WorldAABB.expand(openvdb::BBoxd(Grid->indexToWorld(AABB.min()), Grid->indexToWorld(AABB.max())));
+	}
 
 	/* Make sure our grid is a float grid */
 	if (!DensityGrid) {
@@ -223,7 +238,7 @@ UVaporCloud* UCloudscapeFactory::CreateVolumeTextureFromVDB(const FString& Filen
 	UVolumeTexture& SDFTexture = *CloudData->SignedDistanceField;
 
 	/* Resample the density field */
-	const openvdb::FloatGrid::Ptr ResampledGrid = ResampleGrid(*DensityGrid, VTEX_X, VTEX_Y, VTEX_Z);
+	const openvdb::FloatGrid::Ptr ResampledGrid = ResampleGrid(WorldAABB, *DensityGrid, VTEX_X, VTEX_Y, VTEX_Z);
 
 	/* Create the volume textures from the resampled density field */
 	CreateDensityTexture(DensityTexture, *ResampledGrid);

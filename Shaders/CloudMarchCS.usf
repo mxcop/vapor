@@ -5,14 +5,10 @@
 static const uint MAX_DIRECT_STEPS = 256;
 static const uint MAX_INDIRECT_STEPS = 256;
 
-// Volume Parameters
-static const float SPHERE_SIZE = 100.0; // cm
-
 // Cloud Parameters
 ConstantBuffer<CloudInstance> Cloud;
 
-static const float NOISE_FREQ = 0.01;
-Texture3D<float> AlligatorNoise;
+Texture3D<float4> Noise;
 Texture3D<float4> PathDensityTexture;
 
 // Scene Textures
@@ -30,20 +26,32 @@ float CalcPathDensityThreshold(const float AbsorptionThreshold) {
 /// Calculate a distance-based step size for ray-marching.
 float CalcStepSize(const float Distance) {
     // Step size constants.
-    static const float MIN_STEP_SIZE = 3.0;
+    static const float MIN_STEP_SIZE = 10.0;
     static const float STEP_DISTANCE = 250.0;
 
     // Distance-based step size.
     return MIN_STEP_SIZE + Distance * (1.0 / STEP_DISTANCE);
 }
 
-CloudSample SampleVolume(const float3 Point) {
-    const float3 UVW = (Point - Cloud.Position) / CLOUD_BOUNDS * 0.5 + 0.5;
-    return SampleCloud(Cloud, UVW.xzy);
+float ValueErosion(const float inValue, const float inOldMin) {
+	// derrived from Set-Range, this function uses the oldMin to erode or inflate the input value. - inValues inflate while + inValues erode
+    float old_min_max_range = (1.0 - inOldMin);
+    float clamped_normalized = saturate((inValue - inOldMin) / old_min_max_range);
+    return (clamped_normalized);
 }
 
-// Anisotropic scattering function for clouds.
-// Source: <https://www.guerrilla-games.com/read/nubis-cubed>
+CloudSample SampleVolume(const float3 Point) {
+    const float3 UVW = (Point - Cloud.Position) / HALF_VOLUME_SIZE * 0.5 + 0.5;
+    const CloudSample Sample = SampleCloud(Cloud, UVW);
+    return Sample;
+    // if (Sample.IsOutside()) return Sample;
+    // const float WindOffset = float3(0.25, 0.4, 0.8) * View.GameTime * 0.5;
+    // const float4 Erosion = Noise.Sample(GlobalBilinearWrappedSampler, (UVW * 10.0) - WindOffset);
+    // return CloudSample::Inside(ValueErosion(Sample.Density(), Erosion.a * 0.3) * Cloud.Density);
+}
+
+/// Anisotropic scattering function for clouds.
+/// Source: <https://www.guerrilla-games.com/read/nubis-cubed>
 float HenyeyGreenstein(float VdotL, float G) {
     const float G2 = G * G;
     const float num = 1.0 - G2;
@@ -55,7 +63,7 @@ float HenyeyGreenstein(float VdotL, float G) {
 /// Trace the scene, find out how much light is being absorped.
 float3 TraceAbsorption(const float3 Origin, const float3 Dir, const float PathDensityThreshold) {
     // Intersect the bounds of the volume, return early if we miss.
-    const float2 BoundsIntersection = RayAABB(Origin, Dir, Cloud.Position - CLOUD_BOUNDS, Cloud.Position + CLOUD_BOUNDS);
+    const float2 BoundsIntersection = RayAABB(Origin, Dir, Cloud.Position - HALF_VOLUME_SIZE, Cloud.Position + HALF_VOLUME_SIZE);
     
     // Traversal variables.
     float Distance = max(0.0, BoundsIntersection.x);
@@ -87,13 +95,13 @@ float3 TraceAbsorption(const float3 Origin, const float3 Dir, const float PathDe
     //const float PathDensity = Cloud.Density * (SH1.x + dot(SH1.yzw, Dir) * 3.0);
     
     // Beer's Law <https://en.wikipedia.org/wiki/Beer%E2%80%93Lambert_law>
-    const float3 Absorption = saturate(exp(-Cloud.Absorption * PathDensity));
+    const float3 Absorption = exp(-Cloud.Absorption * max(0.0, PathDensity));
     return Absorption;
 }
 
 float3 TraceVolume(const float3 ViewColor, const float3 Origin, const float3 Dir) {
     // Intersect the bounds of the volume, return early if we miss.
-    const float2 BoundsIntersection = RayAABB(Origin, Dir, Cloud.Position - CLOUD_BOUNDS, Cloud.Position + CLOUD_BOUNDS);
+    const float2 BoundsIntersection = RayAABB(Origin, Dir, Cloud.Position - HALF_VOLUME_SIZE, Cloud.Position + HALF_VOLUME_SIZE);
     if (BoundsIntersection.x > BoundsIntersection.y) return ViewColor;
     
     // Traversal variables.
@@ -131,14 +139,14 @@ float3 TraceVolume(const float3 ViewColor, const float3 Origin, const float3 Dir
         Absorption += StepDensity * (1.0 - Absorption);
         
         // Integrate density along the ray.
-        PathDensity += (Sample.Density() / Cloud.Density) * StepSize; // StepDensity;
+        PathDensity += Sample.Density() * StepSize;
         
         // Integrate direct out-scattering from the sun. 
         Luminance += TraceAbsorption(SamplePos, Cloud.SunDir, PathDensityThreshold) * Scattering * StepDensity * (1.0 - Absorption);
     }
     
     // Beer's Law <https://en.wikipedia.org/wiki/Beer%E2%80%93Lambert_law>
-    const float3 PathAbsorption = saturate(exp(-Cloud.Absorption * PathDensity * Cloud.Density));
+    const float3 PathAbsorption = exp(-Cloud.Absorption * max(0.0, PathDensity));
     
     // Finally, combine the view color with the luminance based on the absorption.
     return ViewColor * PathAbsorption + Luminance;

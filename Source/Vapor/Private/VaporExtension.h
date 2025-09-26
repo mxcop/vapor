@@ -27,9 +27,8 @@ class FVaporExtension : public FSceneViewExtensionBase {
 	FCloudscapeRenderData RenderData;
 	FTextureResource* DensityTexture = nullptr;
 	FTextureResource* SDFTexture = nullptr;
+	FTextureRHIRef NoiseTexture = nullptr;
 	FCriticalSection RenderDataLock;
-
-	class UVolumeTexture* NoiseDataTexture;
 
 	// Alligator Noise Texture
 	FTextureRHIRef AlligatorNoiseTexture;
@@ -60,7 +59,7 @@ public:
 	BEGIN_SHADER_PARAMETER_STRUCT(FParameters, )
 		SHADER_PARAMETER_STRUCT_REF(FCloudscapeRenderData, Cloud)
 		SHADER_PARAMETER_STRUCT_REF(FViewUniformShaderParameters, View)
-		SHADER_PARAMETER_RDG_TEXTURE_SRV(Texture3D, AlligatorNoise)
+		SHADER_PARAMETER_RDG_TEXTURE(Texture3D, Noise)
 		SHADER_PARAMETER_RDG_TEXTURE_SRV(Texture3D, PathDensityTexture)
 		SHADER_PARAMETER_RDG_TEXTURE(Texture2D, SceneColor)
 		SHADER_PARAMETER_RDG_TEXTURE(Texture2D, SceneDepth)

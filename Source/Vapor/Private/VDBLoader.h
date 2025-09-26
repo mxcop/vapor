@@ -1,5 +1,5 @@
 #pragma once
 
-#include "Engine/VolumeTexture.h"
+#include "Rendering/SlateRenderer.h" /* FTextureRHIRef */
 
-UVolumeTexture* LoadAlligatorNoise();
+FTextureRHIRef LoadAlligatorNoise();

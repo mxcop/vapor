@@ -1,11 +1,10 @@
 #include "/Engine/Public/Platform.ush"
 #include "/Engine/Private/Common.ush"
 
-static const float CLOUD_BOUNDS = 100.0;
-static const float UNITS_PER_VOXEL = (CLOUD_BOUNDS * 2.0) / 64.0;
-
-//static const float NOISE_FREQ = 0.01;
-//Texture3D<float> AlligatorNoise;
+static const float UNITS_PER_VOXEL = 800.0; // 8 m
+static const float3 VOLUME_RESOLUTION = float3(512, 512, 64);
+static const float3 VOLUME_SIZE = UNITS_PER_VOXEL * VOLUME_RESOLUTION;
+static const float3 HALF_VOLUME_SIZE = VOLUME_SIZE * 0.5;
 
 /// Sample taken from a cloud.
 struct CloudSample {
@@ -59,6 +58,4 @@ CloudSample SampleCloud(ConstantBuffer<CloudInstance> Cloud, const float3 UVW) {
     // We're inside the volume, so we fetch the density and return it instead.
     const float Density = Cloud.DensityTexture.Sample(GlobalBilinearClampedSampler, UVW);
     return CloudSample::Inside(Density * Cloud.Density);
-    // const float Erosion = AlligatorNoise.Sample(GlobalBilinearWrappedSampler, UVW * NOISE_FREQ);
-    // return CloudSample::Inside(max(Density - (Erosion * Erosion), 0.0) * Cloud.Density);
 }

@@ -38,7 +38,7 @@ enum ERenderTarget {
 FVaporExtension::FVaporExtension(const FAutoRegister& AutoRegister) : FSceneViewExtensionBase(AutoRegister) {
 	UE_LOG(LogTemp, Log, TEXT("Vapor: Custom SceneViewExtension registered"));
 
-	NoiseDataTexture = LoadAlligatorNoise();
+	NoiseTexture = LoadAlligatorNoise();
 
 	/* Fill the noise texture */
 	ENQUEUE_RENDER_COMMAND(AlligatorNoiseGeneration)(
@@ -161,7 +161,7 @@ void FVaporExtension::PrePostProcessPass_RenderThread(FRDGBuilder& GraphBuilder,
 	/* Get the global shader map from our scene view */
 	FGlobalShaderMap* GlobalShaderMap = GetGlobalShaderMap(InView.Family->GetFeatureLevel());
 
-	FRDGTextureRef NoiseTexture = GraphBuilder.RegisterExternalTexture(CreateRenderTarget(AlligatorNoiseTexture, TEXT("Alligator Texture")));
+	// FRDGTextureRef NoiseTexture = GraphBuilder.RegisterExternalTexture(CreateRenderTarget(AlligatorNoiseTexture, TEXT("Alligator Texture")));
 
 	FRDGTextureRef PathDensityTex = GraphBuilder.RegisterExternalTexture(CreateRenderTarget(PathDensityTexture, TEXT("Path Density Texture")));
 
@@ -197,7 +197,7 @@ void FVaporExtension::PrePostProcessPass_RenderThread(FRDGBuilder& GraphBuilder,
 		PassParameters->Cloud = TUniformBufferRef<FCloudscapeRenderData>::CreateUniformBufferImmediate(RenderData, EUniformBufferUsage::UniformBuffer_SingleFrame);
 	}
 	PassParameters->View = InView.ViewUniformBuffer;
-	PassParameters->AlligatorNoise = GraphBuilder.CreateSRV(FRDGTextureSRVDesc(NoiseTexture));
+	PassParameters->Noise = GraphBuilder.RegisterExternalTexture(CreateRenderTarget(NoiseTexture, TEXT("Noise Texture")));
 	PassParameters->PathDensityTexture = GraphBuilder.CreateSRV(FRDGTextureSRVDesc(PathDensityTex));
 	PassParameters->SceneColor = SceneColor;
 	PassParameters->SceneDepth = SceneDepth;
