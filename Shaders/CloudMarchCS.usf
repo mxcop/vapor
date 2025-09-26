@@ -25,29 +25,25 @@ float CalcPathDensityThreshold(const float AbsorptionThreshold) {
 
 /// Calculate a distance-based step size for ray-marching.
 float CalcStepSize(const float Distance) {
-    // Step size constants.
-    static const float MIN_STEP_SIZE = 10.0;
-    static const float STEP_DISTANCE = 250.0;
-
-    // Distance-based step size.
-    return MIN_STEP_SIZE + Distance * (1.0 / STEP_DISTANCE);
+    // return Cloud.PrimaryNearStep + Distance * Cloud.PrimaryStepPerDistance;
+    return max(Cloud.PrimaryNearStep, sqrt(Distance) * Cloud.PrimaryStepPerDistance);
 }
 
-float ValueErosion(const float inValue, const float inOldMin) {
-	// derrived from Set-Range, this function uses the oldMin to erode or inflate the input value. - inValues inflate while + inValues erode
-    float old_min_max_range = (1.0 - inOldMin);
-    float clamped_normalized = saturate((inValue - inOldMin) / old_min_max_range);
-    return (clamped_normalized);
+float ValueErosion(const float Value, const float Erosion) {
+	const float InvErosion = (1.0 - Erosion);
+    return saturate((Value - Erosion) / InvErosion);
 }
 
 CloudSample SampleVolume(const float3 Point) {
     const float3 UVW = (Point - Cloud.Position) / HALF_VOLUME_SIZE * 0.5 + 0.5;
     const CloudSample Sample = SampleCloud(Cloud, UVW);
     return Sample;
-    // if (Sample.IsOutside()) return Sample;
-    // const float WindOffset = float3(0.25, 0.4, 0.8) * View.GameTime * 0.5;
-    // const float4 Erosion = Noise.Sample(GlobalBilinearWrappedSampler, (UVW * 10.0) - WindOffset);
-    // return CloudSample::Inside(ValueErosion(Sample.Density(), Erosion.a * 0.3) * Cloud.Density);
+    //if (Sample.IsOutside()) return Sample;
+    //const float WindOffset = float3(0.25, 0.4, 0.8) * View.GameTime * 0.1;
+    //const float4 Erosion = Noise.Sample(GlobalBilinearWrappedSampler, (Point * 0.0001) - WindOffset);
+    //const float BillowyFreqGradient = pow(Sample.Density() / Cloud.Density, 0.25);
+    //const float BillowyNoise = lerp(Erosion.b * 0.3, Erosion.a * 0.3, BillowyFreqGradient);
+    //return CloudSample::Inside(ValueErosion(Sample.Density() / Cloud.Density, BillowyNoise) * Cloud.Density);
 }
 
 /// Anisotropic scattering function for clouds.
@@ -68,7 +64,6 @@ float3 TraceAbsorption(const float3 Origin, const float3 Dir, const float PathDe
     // Traversal variables.
     float Distance = max(0.0, BoundsIntersection.x);
     float PathDensity = 0.0;
-    float StepSize = Cloud.InnerStepSize;
     
     for (uint s = 0; s < MAX_INDIRECT_STEPS; ++s) {
         if (Distance >= BoundsIntersection.y) break;
@@ -79,13 +74,13 @@ float3 TraceAbsorption(const float3 Origin, const float3 Dir, const float PathDe
         
         // No work to be done outside the volume, just keep stepping.
         if (Sample.IsOutside()) {
-            Distance += max(Cloud.MinStepSize, Sample.SDist()); // Move along the ray to the next location.
+            Distance += max(Cloud.PrimaryMinSDFStep, Sample.SDist()); // Move along the ray to the next location.
             continue;
         }
-        Distance += StepSize;
+        Distance += Cloud.SecondaryStep;
         
         // We're inside the volume, accumulate density.
-        PathDensity += Sample.Density() * StepSize;
+        PathDensity += Sample.Density() * Cloud.SecondaryStep;
         if (PathDensity > PathDensityThreshold) break;
     }
     
@@ -95,7 +90,7 @@ float3 TraceAbsorption(const float3 Origin, const float3 Dir, const float PathDe
     //const float PathDensity = Cloud.Density * (SH1.x + dot(SH1.yzw, Dir) * 3.0);
     
     // Beer's Law <https://en.wikipedia.org/wiki/Beer%E2%80%93Lambert_law>
-    const float3 Absorption = exp(-Cloud.Absorption * max(0.0, PathDensity));
+    const float3 Absorption = exp(-Cloud.Absorption * PathDensity * 0.0001);
     return Absorption;
 }
 
@@ -111,7 +106,7 @@ float3 TraceVolume(const float3 ViewColor, const float3 Origin, const float3 Dir
     float Distance = max(0.0, BoundsIntersection.x);
     
     // Calculate at what path density we will reach the extinction threshold.
-    const float PathDensityThreshold = CalcPathDensityThreshold(Cloud.ExtinctionThreshold);
+    const float PathDensityThreshold = CalcPathDensityThreshold(Cloud.SecondaryExtinctThreshold);
     
     // Sun out-scattering will be identical everywhere along the ray, so we pre-calculate it.
     const float3 Scattering = Cloud.SunLuminance * HenyeyGreenstein(dot(Dir, Cloud.SunDir), 0.2);
@@ -126,7 +121,7 @@ float3 TraceVolume(const float3 ViewColor, const float3 Origin, const float3 Dir
         
         // No work to be done outside the volume, just keep stepping.
         if (Sample.IsOutside()) {
-            Distance += max(Cloud.MinStepSize, Sample.SDist()); // Move along the ray to the next location.
+            Distance += max(Cloud.PrimaryMinSDFStep, Sample.SDist()); // Move along the ray to the next location.
             continue;
         }
         const float StepSize = CalcStepSize(Distance);
@@ -136,17 +131,17 @@ float3 TraceVolume(const float3 ViewColor, const float3 Origin, const float3 Dir
         const float StepDensity = Sample.Density() * StepSize;
         
         // Integrate the absorption along the ray.
-        Absorption += StepDensity * (1.0 - Absorption);
+        Absorption = saturate(Absorption + StepDensity * (1.0 - Absorption));
         
         // Integrate density along the ray.
-        PathDensity += Sample.Density() * StepSize;
+        PathDensity += StepDensity;
         
         // Integrate direct out-scattering from the sun. 
         Luminance += TraceAbsorption(SamplePos, Cloud.SunDir, PathDensityThreshold) * Scattering * StepDensity * (1.0 - Absorption);
     }
     
     // Beer's Law <https://en.wikipedia.org/wiki/Beer%E2%80%93Lambert_law>
-    const float3 PathAbsorption = exp(-Cloud.Absorption * max(0.0, PathDensity));
+    const float3 PathAbsorption = exp(-Cloud.Absorption * PathDensity);
     
     // Finally, combine the view color with the luminance based on the absorption.
     return ViewColor * PathAbsorption + Luminance;

@@ -95,10 +95,11 @@ void FVaporExtension::BeginRenderViewFamily(FSceneViewFamily& ViewFamily) {
 	if (SkyInstance) Data.SunLuminance *= (FVector3f)SkyInstance->GetComponent()->GetAtmosphereTransmitanceOnGroundAtPlanetTop(SunInstance->GetComponent());
 	Data.Absorption = VaporInstance->GetComponent()->Absorption;
 	Data.Density = VaporInstance->GetComponent()->Density;
-	Data.MinStepSize = VaporInstance->GetComponent()->MinStepSize;
-	Data.InnerStepSize = VaporInstance->GetComponent()->InnerStepSize;
-	Data.StepSizeMult = VaporInstance->GetComponent()->StepSizeMult;
-	Data.ExtinctionThreshold = VaporInstance->GetComponent()->ExtinctionThreshold;
+	Data.PrimaryNearStep = VaporInstance->GetComponent()->PrimaryNearStep;
+	Data.PrimaryStepPerDistance = VaporInstance->GetComponent()->PrimaryStepPerDistance;
+	Data.PrimaryMinSDFStep = VaporInstance->GetComponent()->PrimaryMinSDFStep;
+	Data.SecondaryStep = VaporInstance->GetComponent()->SecondaryStep;
+	Data.SecondaryExtinctThreshold = VaporInstance->GetComponent()->SecondaryExtinctThreshold;
 
 	if (VaporInstance->GetComponent()->CloudAsset) {
 		DensityTexture = VaporInstance->GetComponent()->CloudAsset->DensityField->GetResource();

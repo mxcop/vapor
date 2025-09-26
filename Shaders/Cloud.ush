@@ -33,12 +33,15 @@ struct CloudInstance {
     // Light Data
     float3 SunDir;
     float3 SunLuminance;
+        
+    // Primary Ray Options
+    float PrimaryNearStep;
+    float PrimaryStepPerDistance;
+    float PrimaryMinSDFStep;
     
-    // Performance
-    float MinStepSize;
-    float InnerStepSize;
-    float StepSizeMult;
-    float ExtinctionThreshold;
+    // Secondary Ray Options
+    float SecondaryStep;
+    float SecondaryExtinctThreshold;
     
     // Textures
     Texture3D<float> DensityTexture;

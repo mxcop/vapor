@@ -20,16 +20,19 @@ class UVaporComponent : public UPrimitiveComponent {
 	float Density = 0.02f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cloudscape")
-	float MinStepSize = 0.1f;
+	float PrimaryNearStep = 300.0f; // cm
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cloudscape")
-	float InnerStepSize = 1.0f;
+	float PrimaryStepPerDistance = 0.003662f; // 1.0 / (16384.0 / 60.0)
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cloudscape")
-	float StepSizeMult = 1.2f;
+	float PrimaryMinSDFStep = 300.0f; // cm
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cloudscape")
-	float ExtinctionThreshold = 0.001f;
+	float SecondaryStep = 800.0f; // cm
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cloudscape")
+	float SecondaryExtinctThreshold = 0.99f; // %
 };
 
 /* Vapor Instance Actor */

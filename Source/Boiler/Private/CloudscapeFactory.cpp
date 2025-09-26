@@ -68,8 +68,10 @@ openvdb::FloatGrid::Ptr ResampleGrid(const openvdb::BBoxd& WorldAABB, const open
 	const openvdb::Vec3d StepSizes = WorldAABB.extents() / openvdb::Vec3d(X, Z, Y);
 	const double StepSize = std::max(std::max(StepSizes.x(), StepSizes.y()), StepSizes.z());
 
-	UE_LOG(LogTemp, Warning, TEXT("WorldSize: %f, %f, %f"), WorldAABB.extents().x(), WorldAABB.extents().y(), WorldAABB.extents().z());
-	UE_LOG(LogTemp, Warning, TEXT("StepSize: %f, %f, %f"), StepSizes.x(), StepSizes.y(), StepSizes.z());
+	/* Calculate the down-scale factor of the resampling process */
+	const openvdb::Coord GridSize = Grid.evalActiveVoxelDim();
+	const openvdb::Vec3f ScaleFactor = openvdb::Vec3f(GridSize.x(), GridSize.y(), GridSize.z()) / openvdb::Vec3f(X, Z, Y);
+	const float LargestScaleFactor = std::max(std::max(ScaleFactor.x(), ScaleFactor.y()), ScaleFactor.z());
 
 	/* Create the new resampled grid */
 	openvdb::FloatGrid::Ptr Resampled = openvdb::FloatGrid::create(0.0f);
@@ -77,9 +79,9 @@ openvdb::FloatGrid::Ptr ResampleGrid(const openvdb::BBoxd& WorldAABB, const open
 
 	/* Pre-filter the input grid for down-sampling */
 	openvdb::FloatGrid::Ptr Filtered = Grid.deepCopy();
-	if (StepSize > 1.0f) {
+	if (LargestScaleFactor >= 2.0f) {
 		openvdb::tools::Filter<openvdb::FloatGrid> Filter(*Filtered);
-		Filter.gaussian(StepSize, 1);
+		Filter.gaussian((int)LargestScaleFactor / 2, 1);
 	}
 
 	/* Create a box grid sampler for the input grid */
