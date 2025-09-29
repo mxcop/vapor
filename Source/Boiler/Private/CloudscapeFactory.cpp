@@ -163,7 +163,7 @@ void CreateSDFTexture(UVolumeTexture& Output, const openvdb::FloatGrid& DensityG
 
 				/* Calculate the texture index and write our SDF data */
 				const int32 index = x + (y * VTEX_X) + (z * VTEX_X * VTEX_Y);
-				TextureData[index] = (uint16)Remap(SDF, -256.0f, 4096.0f, 0.0f, 65535.0f);
+				TextureData[index] = (uint16)Remap(SDF, -32.0f, 512.0f, 0.0f, 65535.0f);
 			}
 		}
 	}
@@ -173,7 +173,7 @@ void CreateSDFTexture(UVolumeTexture& Output, const openvdb::FloatGrid& DensityG
 
 	/* Set all the volume texture settings */
 	Output.MipGenSettings = TMGS_NoMipmaps;
-	Output.CompressionSettings = TC_Grayscale;
+	Output.CompressionSettings = TC_Alpha;
 	Output.SRGB = false;
 	Output.Filter = TF_Bilinear;
 	Output.AddressMode = TA_Wrap;

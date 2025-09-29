@@ -81,7 +81,7 @@ float3 TraceAbsorption(const float3 Origin, const float3 Dir, const float PathDe
         
         // We're inside the volume, accumulate density.
         PathDensity += Sample.Density() * Cloud.SecondaryStep;
-        if (PathDensity > PathDensityThreshold) break;
+        // if (PathDensity > PathDensityThreshold) break;
     }
     
     // Sample path density from baked spherical harmonics.
@@ -90,7 +90,7 @@ float3 TraceAbsorption(const float3 Origin, const float3 Dir, const float PathDe
     //const float PathDensity = Cloud.Density * (SH1.x + dot(SH1.yzw, Dir) * 3.0);
     
     // Beer's Law <https://en.wikipedia.org/wiki/Beer%E2%80%93Lambert_law>
-    const float3 Absorption = exp(-Cloud.Absorption * PathDensity * 0.0001);
+    const float3 Absorption = exp(-Cloud.Absorption * PathDensity);
     return Absorption;
 }
 
