@@ -18,6 +18,12 @@ Texture2D<float> SceneDepth;
 // Output Texture
 RWTexture2D<float4> Output;
 
+// #define DB_PRIMARY_STEPS
+
+#ifdef DB_PRIMARY_STEPS
+static uint STEP_COUNT = 0;
+#endif
+
 /// Calculate the threshold path density at which the absorption reaches a given threshold.
 float CalcPathDensityThreshold(const float AbsorptionThreshold) {
     return -log(AbsorptionThreshold) / min(min(Cloud.Absorption.r, Cloud.Absorption.g), Cloud.Absorption.b);
@@ -30,8 +36,8 @@ float CalcStepSize(const float Distance) {
 }
 
 float ValueErosion(const float Value, const float Erosion) {
-	const float InvErosion = (1.0 - Erosion);
-    return saturate((Value - Erosion) / InvErosion);
+    const float InvErosion = max(0.0001, 1.0 - Erosion);
+    return max(0.0, Value - Erosion) / InvErosion;
 }
 
 CloudSample SampleVolume(const float3 Point) {
@@ -81,7 +87,7 @@ float3 TraceAbsorption(const float3 Origin, const float3 Dir, const float PathDe
         
         // We're inside the volume, accumulate density.
         PathDensity += Sample.Density() * Cloud.SecondaryStep;
-        if (PathDensity > PathDensityThreshold) break;
+        // if (PathDensity > PathDensityThreshold) return float3(0.0, 0.0, 0.0);
     }
     
     // Sample path density from baked spherical harmonics.
@@ -90,7 +96,7 @@ float3 TraceAbsorption(const float3 Origin, const float3 Dir, const float PathDe
     //const float PathDensity = Cloud.Density * (SH1.x + dot(SH1.yzw, Dir) * 3.0);
     
     // Beer's Law <https://en.wikipedia.org/wiki/Beer%E2%80%93Lambert_law>
-    const float3 Absorption = exp(-Cloud.Absorption * PathDensity * 0.0001);
+    const float3 Absorption = exp(-Cloud.Absorption * PathDensity);
     return Absorption;
 }
 
@@ -114,6 +120,10 @@ float3 TraceVolume(const float3 ViewColor, const float3 Origin, const float3 Dir
     // Integrate luminance along the ray.
     for (uint s = 0; s < MAX_DIRECT_STEPS; ++s) {
         if (Distance >= BoundsIntersection.y) break;
+        
+#ifdef DB_PRIMARY_STEPS
+        STEP_COUNT++;
+#endif
         
         // Sample the volume at the current location.
         const float3 SamplePos = Origin + Dir * Distance;
@@ -165,5 +175,10 @@ void MainCS(uint2 DispatchThreadId : SV_DispatchThreadID) {
     
     // Ray vs Sphere intersection test.
     const float3 FinalColor = TraceVolume(SceneColor[Pixel], RayOrigin, RayDirection);
+    
+#ifdef DB_PRIMARY_STEPS
+    Output[Pixel] = float4((float)STEP_COUNT / (float)MAX_DIRECT_STEPS, 0.0, 0.0, 1.0);
+#else
     Output[Pixel] = float4(FinalColor, 1.0);
+#endif
 }

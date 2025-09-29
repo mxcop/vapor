@@ -45,15 +45,20 @@ struct CloudInstance {
     
     // Textures
     Texture3D<float> DensityTexture;
+    // Texture3D<float3> SDFTexture;
     Texture3D<float> SDFTexture;
 };
+
+// Values used to decode the BC1 compressed SDF.
+static const float3 SDF_DECODE = float3(1.0, 0.03529415, 0.00069204);
 
 /// Sample the cloud.
 CloudSample SampleCloud(ConstantBuffer<CloudInstance> Cloud, const float3 UVW) {
     // Sample the Signed Distance Field.
-    // The SDF is stored from -256 to 4096 in a UNorm texture encoded in voxel-space.
+    // The SDF is stored from -32 to 512 in a UNorm texture encoded in voxel-space.
+    // const float NormSDist = dot(Cloud.SDFTexture.Sample(GlobalBilinearClampedSampler, UVW).rgb, SDF_DECODE);
     const float NormSDist = Cloud.SDFTexture.Sample(GlobalBilinearClampedSampler, UVW);
-    const float SDist = (NormSDist * 4352.0 - 256.0) * UNITS_PER_VOXEL;
+    const float SDist = (NormSDist * 544.0 - 32.0) * UNITS_PER_VOXEL;
     
     // If the distance is above zero, we're outside the cloud, return the signed distance.
     if (SDist > 0.0) return CloudSample::Outside(SDist);
