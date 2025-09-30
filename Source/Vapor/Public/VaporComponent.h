@@ -33,6 +33,12 @@ class UVaporComponent : public UPrimitiveComponent {
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cloudscape")
 	float SecondaryExtinctThreshold = 0.99f; // %
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cloudscape")
+	float NoiseFrequency = 0.01f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cloudscape")
+	bool Debug = false;
 };
 
 /* Vapor Instance Actor */

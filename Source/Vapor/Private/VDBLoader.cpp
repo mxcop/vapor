@@ -55,8 +55,8 @@ UVolumeTexture* LoadAlligatorNoise() {
 	const openvdb::FloatGrid::ConstAccessor AccessorB = LFAlligator->getConstAccessor();
 	const openvdb::FloatGrid::ConstAccessor AccessorA = LFCurlyWorley->getConstAccessor();
 
-	/* Create new volume texture asset */
-	UVolumeTexture* NewTexture = NewObject<UVolumeTexture>(GetTransientPackage(), "Noise Texture");
+	/* Create new volume texture asset (marked as root to avoid garbage collection) */
+	UVolumeTexture* NewTexture = NewObject<UVolumeTexture>(GetTransientPackage(), "Noise Texture", RF_MarkAsRootSet);
 
 	/* Initialize the volume texture */
 	NewTexture->Source.Init(NOISE_RESOLUTION_X, NOISE_RESOLUTION_Y, NOISE_RESOLUTION_Z, 1, TSF_BGRA8, nullptr);
@@ -73,9 +73,9 @@ UVolumeTexture* LoadAlligatorNoise() {
 
 				/* Set the value inside our resampled grid */
 				const int32 Index = x + (y * NOISE_RESOLUTION_X) + (z * NOISE_RESOLUTION_X * NOISE_RESOLUTION_Y);
-				TextureData[Index * 4 + 0] = (uint8)(ValueB * 255.0f);
+				TextureData[Index * 4 + 0] = (uint8)(ValueR * 255.0f);
 				TextureData[Index * 4 + 1] = (uint8)(ValueG * 255.0f);
-				TextureData[Index * 4 + 2] = (uint8)(ValueR * 255.0f);
+				TextureData[Index * 4 + 2] = (uint8)(ValueB * 255.0f);
 				TextureData[Index * 4 + 3] = (uint8)(ValueA * 255.0f);
 			}
 		}

@@ -21,6 +21,7 @@ BEGIN_UNIFORM_BUFFER_STRUCT(FCloudscapeRenderData, )
 	// Secondary Ray Options
 	SHADER_PARAMETER(float, SecondaryStep)
 	SHADER_PARAMETER(float, SecondaryExtinctThreshold)
+	SHADER_PARAMETER(float, NoiseFreq)
 	SHADER_PARAMETER_RDG_TEXTURE(Texture3D, DensityTexture)
 	SHADER_PARAMETER_RDG_TEXTURE(Texture3D, SDFTexture)
 END_UNIFORM_BUFFER_STRUCT()
@@ -33,10 +34,7 @@ class FVaporExtension : public FSceneViewExtensionBase {
 	UVolumeTexture* NoiseTexture = nullptr;
 	FCriticalSection RenderDataLock;
 
-	// Alligator Noise Texture
-	FTextureRHIRef AlligatorNoiseTexture;
-
-	FTextureRHIRef PathDensityTexture;
+	bool DebugMode = false;
 
 public:
 	FVaporExtension(const FAutoRegister& AutoRegister);
@@ -63,11 +61,13 @@ public:
 		SHADER_PARAMETER_STRUCT_REF(FCloudscapeRenderData, Cloud)
 		SHADER_PARAMETER_STRUCT_REF(FViewUniformShaderParameters, View)
 		SHADER_PARAMETER_RDG_TEXTURE(Texture3D, Noise)
-		SHADER_PARAMETER_RDG_TEXTURE_SRV(Texture3D, PathDensityTexture)
 		SHADER_PARAMETER_RDG_TEXTURE(Texture2D, SceneColor)
 		SHADER_PARAMETER_RDG_TEXTURE(Texture2D, SceneDepth)
 		SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D<float4>, Output)
 	END_SHADER_PARAMETER_STRUCT()
+
+	class FDebugDim : SHADER_PERMUTATION_BOOL("DEBUG");
+	using FPermutationDomain = TShaderPermutationDomain<FDebugDim>;
 
 	// Basic shader initialization
 	static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters) {

@@ -8,14 +8,16 @@ static const uint MAX_INDIRECT_STEPS = 256;
 // Cloud Parameters
 ConstantBuffer<CloudInstance> Cloud;
 
-Texture3D<float4> PathDensityTexture;
-
 // Scene Textures
 Texture2D<float3> SceneColor;
 Texture2D<float> SceneDepth;
 
 // Output Texture
 RWTexture2D<float4> Output;
+
+#if DEBUG
+static int STEP_COUNT = 0;
+#endif
 
 /// Calculate the threshold path density at which the absorption reaches a given threshold.
 float CalcPathDensityThreshold(const float AbsorptionThreshold) {
@@ -107,6 +109,10 @@ float3 TraceVolume(const float3 ViewColor, const float3 Origin, const float3 Dir
     for (uint s = 0; s < MAX_DIRECT_STEPS; ++s) {
         if (Distance >= BoundsIntersection.y) break;
         
+#if DEBUG
+        STEP_COUNT++;
+#endif
+        
         // Sample the volume at the current location.
         const float3 SamplePos = Origin + Dir * Distance;
         const CloudSample Sample = SampleVolume(SamplePos);
@@ -157,5 +163,10 @@ void MainCS(uint2 DispatchThreadId : SV_DispatchThreadID) {
     
     // Ray vs Sphere intersection test.
     const float3 FinalColor = TraceVolume(SceneColor[Pixel], RayOrigin, RayDirection);
+    
+#if DEBUG
+    Output[Pixel] = float4((float)STEP_COUNT / (float)MAX_DIRECT_STEPS, 0.0, 0.0, 1.0);
+#else
     Output[Pixel] = float4(FinalColor, 1.0);
+#endif
 }

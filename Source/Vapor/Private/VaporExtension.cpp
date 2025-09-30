@@ -13,7 +13,6 @@
 
 IMPLEMENT_GLOBAL_SHADER(FCloudShader, "/Plugins/Vapor/CloudMarchCS.usf", "MainCS", SF_Compute);
 IMPLEMENT_GLOBAL_SHADER(FNoiseShader, "/Plugins/Vapor/NoiseGenCS.usf", "MainCS", SF_Compute);
-//IMPLEMENT_GLOBAL_SHADER(FBakeShader, "/Plugins/Vapor/BakeAbsorptionCS.usf", "MainCS", SF_Compute);
 
 IMPLEMENT_UNIFORM_BUFFER_STRUCT(FCloudscapeRenderData, "Cloud");
 
@@ -37,41 +36,6 @@ enum ERenderTarget {
 
 FVaporExtension::FVaporExtension(const FAutoRegister& AutoRegister) : FSceneViewExtensionBase(AutoRegister) {
 	UE_LOG(LogTemp, Log, TEXT("Vapor: Custom SceneViewExtension registered"));
-
-	/* Fill the noise texture */
-	ENQUEUE_RENDER_COMMAND(AlligatorNoiseGeneration)(
-	[this](FRHICommandListImmediate& RHICmdList) {
-		FRDGBuilder GraphBuilder(RHICmdList);
-
-		/* Create the noise texture */
-		FRHITextureCreateDesc Desc = FRHITextureCreateDesc::Create3D(TEXT("Alligator Texture"))
-			.SetExtent(512, 512)
-			.SetDepth(512)
-			.SetFormat(PF_R8)
-			.SetFlags(ETextureCreateFlags::UAV | ETextureCreateFlags::ShaderResource)
-			.SetInitialState(ERHIAccess::UAVCompute);
-		AlligatorNoiseTexture = RHICreateTexture(Desc);
-
-		/* Get the global shader map from our scene view */
-		FGlobalShaderMap* GlobalShaderMap = GetGlobalShaderMap(GMaxRHIFeatureLevel);
-
-		FRDGTextureRef NoiseTexture = GraphBuilder.RegisterExternalTexture(CreateRenderTarget(AlligatorNoiseTexture, TEXT("Alligator Texture")));
-
-		/* Allocate and fill-in the shader pass parameters */
-		FNoiseShader::FParameters* PassParameters = GraphBuilder.AllocParameters<FNoiseShader::FParameters>();
-		PassParameters->Output = GraphBuilder.CreateUAV(FRDGTextureUAVDesc(NoiseTexture));
-
-		/* Calculate the group count based on the viewport size */
-		const FIntVector DispatchCount = FIntVector(128, 128, 128); // FComputeShaderUtils::GetGroupCount(FIntVector(512, 512, 512), FComputeShaderUtils::kGolden2DGroupSize);
-
-		/* Load our custom shader from the global shader map */
-		TShaderMapRef<FNoiseShader> ComputeShader(GlobalShaderMap);
-
-		FComputeShaderUtils::AddPass(GraphBuilder,
-			RDG_EVENT_NAME("Alligator Noise Generation Pass"),
-			ComputeShader, PassParameters, DispatchCount);
-		GraphBuilder.Execute();
-	});
 }
 
 void FVaporExtension::BeginRenderViewFamily(FSceneViewFamily& ViewFamily) {
@@ -98,7 +62,15 @@ void FVaporExtension::BeginRenderViewFamily(FSceneViewFamily& ViewFamily) {
 	Data.PrimaryMinSDFStep = VaporInstance->GetComponent()->PrimaryMinSDFStep;
 	Data.SecondaryStep = VaporInstance->GetComponent()->SecondaryStep;
 	Data.SecondaryExtinctThreshold = VaporInstance->GetComponent()->SecondaryExtinctThreshold;
+	Data.NoiseFreq = VaporInstance->GetComponent()->NoiseFrequency;
 
+	{ /* Lock and update the render data */
+		FScopeLock Lock(&RenderDataLock);
+		DebugMode = VaporInstance->GetComponent()->Debug;
+		RenderData = MoveTemp(Data);
+	}
+
+	/* Get the different textures from the cloud asset */
 	if (VaporInstance->GetComponent()->CloudAsset) {
 		DensityTexture = VaporInstance->GetComponent()->CloudAsset->DensityField->GetResource();
 		if (DensityTexture == nullptr) DensityTexture = VaporInstance->GetComponent()->CloudAsset->DensityField->CreateResource();
@@ -110,52 +82,9 @@ void FVaporExtension::BeginRenderViewFamily(FSceneViewFamily& ViewFamily) {
 	if (NoiseTexture == nullptr) {
 		NoiseTexture = LoadAlligatorNoise();
 	}
-
-	if (VaporInstance->GetComponent()->CloudAsset && PathDensityTexture.IsValid() == false) {
-		/* Fill the path density texture */
-		ENQUEUE_RENDER_COMMAND(ShBakeGeneration)(
-		[this](FRHICommandListImmediate& RHICmdList) {
-			FRDGBuilder GraphBuilder(RHICmdList);
-
-			/* Create the noise texture */
-			FRHITextureCreateDesc Desc = FRHITextureCreateDesc::Create3D(TEXT("Path Density Texture"))
-				.SetExtent(512, 512)
-				.SetDepth(512)
-				.SetFormat(PF_A32B32G32R32F)
-				.SetFlags(ETextureCreateFlags::UAV | ETextureCreateFlags::ShaderResource)
-				.SetInitialState(ERHIAccess::UAVCompute);
-			PathDensityTexture = RHICreateTexture(Desc);
-
-			///* Get the global shader map from our scene view */
-			//FGlobalShaderMap* GlobalShaderMap = GetGlobalShaderMap(GMaxRHIFeatureLevel);
-
-			//FRDGTextureRef SHTexture = GraphBuilder.RegisterExternalTexture(CreateRenderTarget(PathDensityTexture, TEXT("Path Density Texture")));
-
-			///* Allocate and fill-in the shader pass parameters */
-			//FBakeShader::FParameters* PassParameters = GraphBuilder.AllocParameters<FBakeShader::FParameters>();
-			//PassParameters->OutputSH = GraphBuilder.CreateUAV(FRDGTextureUAVDesc(SHTexture));
-			//{
-			//	FScopeLock Lock(&RenderDataLock);
-			//	RenderData.DensityTexture = GraphBuilder.RegisterExternalTexture(CreateRenderTarget(DensityTexture->GetTextureRHI(), TEXT("Density Texture")));
-			//	RenderData.SDFTexture = GraphBuilder.RegisterExternalTexture(CreateRenderTarget(SDFTexture->GetTextureRHI(), TEXT("SDF Texture")));
-			//	PassParameters->Cloud = TUniformBufferRef<FCloudscapeRenderData>::CreateUniformBufferImmediate(RenderData, EUniformBufferUsage::UniformBuffer_SingleFrame);
-			//}
-
-			///* Calculate the group count based on the viewport size */
-			//const FIntVector DispatchCount = FIntVector(512 / 4, 512 / 4, 512 / 4); // FComputeShaderUtils::GetGroupCount(FIntVector(512, 512, 512), FComputeShaderUtils::kGolden2DGroupSize);
-
-			///* Load our custom shader from the global shader map */
-			//TShaderMapRef<FBakeShader> ComputeShader(GlobalShaderMap);
-
-			//FComputeShaderUtils::AddPass(GraphBuilder,
-			//	RDG_EVENT_NAME("Path Density Integration Pass"),
-			//	ComputeShader, PassParameters, DispatchCount);
-			GraphBuilder.Execute();
-		});
+	if (NoiseTexture->GetResource() == nullptr) {
+		NoiseTexture->CreateResource();
 	}
-
-	FScopeLock Lock(&RenderDataLock);
-	RenderData = MoveTemp(Data);
 }
 
 void FVaporExtension::PrePostProcessPass_RenderThread(FRDGBuilder& GraphBuilder, const FSceneView& InView, const FPostProcessingInputs& Inputs) {
@@ -164,10 +93,6 @@ void FVaporExtension::PrePostProcessPass_RenderThread(FRDGBuilder& GraphBuilder,
 
 	/* Get the global shader map from our scene view */
 	FGlobalShaderMap* GlobalShaderMap = GetGlobalShaderMap(InView.Family->GetFeatureLevel());
-
-	// FRDGTextureRef NoiseTexture = GraphBuilder.RegisterExternalTexture(CreateRenderTarget(AlligatorNoiseTexture, TEXT("Alligator Texture")));
-
-	FRDGTextureRef PathDensityTex = GraphBuilder.RegisterExternalTexture(CreateRenderTarget(PathDensityTexture, TEXT("Path Density Texture")));
 
 	/* Start the render graph event scope */
 	RDG_EVENT_SCOPE(GraphBuilder, "Vapor Render Pass");
@@ -202,7 +127,6 @@ void FVaporExtension::PrePostProcessPass_RenderThread(FRDGBuilder& GraphBuilder,
 	}
 	PassParameters->View = InView.ViewUniformBuffer;
 	PassParameters->Noise = GraphBuilder.RegisterExternalTexture(CreateRenderTarget(NoiseTexture->GetResource()->GetTextureRHI(), TEXT("Noise Texture")));
-	PassParameters->PathDensityTexture = GraphBuilder.CreateSRV(FRDGTextureSRVDesc(PathDensityTex));
 	PassParameters->SceneColor = SceneColor;
 	PassParameters->SceneDepth = SceneDepth;
 	PassParameters->Output = GraphBuilder.CreateUAV(FRDGTextureUAVDesc(OutputTexture));
@@ -210,8 +134,12 @@ void FVaporExtension::PrePostProcessPass_RenderThread(FRDGBuilder& GraphBuilder,
 	/* Calculate the group count based on the viewport size */
 	const FIntVector DispatchCount = FComputeShaderUtils::GetGroupCount(ViewSize, FComputeShaderUtils::kGolden2DGroupSize);
 
+	/* Set the permutation vector for the shader */
+	FCloudShader::FPermutationDomain PermutationVector;
+	PermutationVector.Set<FCloudShader::FDebugDim>(DebugMode);
+
 	/* Load our custom shader from the global shader map */
-	TShaderMapRef<FCloudShader> ComputeShader(GlobalShaderMap);
+	TShaderMapRef<FCloudShader> ComputeShader(GlobalShaderMap, PermutationVector);
 
 	FComputeShaderUtils::AddPass(GraphBuilder,
 		RDG_EVENT_NAME("Vapor Cloud Rendering %dx%d", ViewSize.X, ViewSize.Y),

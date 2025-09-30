@@ -7,6 +7,7 @@ static const float3 VOLUME_SIZE = UNITS_PER_VOXEL * VOLUME_RESOLUTION;
 static const float3 HALF_VOLUME_SIZE = VOLUME_SIZE * 0.5;
 
 /// 4 types of noise packed into a single texture.
+/// Channels: HFAlligator, HFCurlyWorley, LFAlligator, LFCurlyWorley
 Texture3D<float4> Noise;
 
 /// Sample taken from a cloud.
@@ -46,6 +47,8 @@ struct CloudInstance {
     float SecondaryStep;
     float SecondaryExtinctThreshold;
     
+    float NoiseFreq;
+    
     // Textures
     Texture3D<float> DensityTexture;
     Texture3D<float> SDFTexture;
@@ -72,9 +75,12 @@ CloudSample SampleCloud(ConstantBuffer<CloudInstance> Cloud, const float3 Point)
     const float Density = Cloud.DensityTexture.Sample(GlobalBilinearClampedSampler, UVW);
     
     const float WindOffset = float3(0.25, 0.4, 0.8) * View.GameTime * 0.1;
-    const float4 Erosion = Noise.Sample(GlobalBilinearWrappedSampler, (Point * 0.0001) - WindOffset);
-    const float BillowyFreqGradient = pow(Density, 0.25);
-    const float BillowyNoise = lerp(Erosion.b * 0.3, Erosion.a * 0.3, BillowyFreqGradient);
+    const float4 NoiseSample = Noise.Sample(GlobalBilinearWrappedSampler, (Point * Cloud.NoiseFreq) - WindOffset);
+    
+    const float DimensionalProfile = min(1.0, -SDist / UNITS_PER_VOXEL * 0.5);
+    const float BillowyFreqGradient = pow(DimensionalProfile, 0.25);
+    const float BillowyNoise = lerp(NoiseSample.b * 0.3, NoiseSample.r * 0.3, BillowyFreqGradient);
+    
     return CloudSample::Inside(ValueErosion(Density, BillowyNoise) * Cloud.Density);
     
     // return CloudSample::Inside(Density * Cloud.Density);
