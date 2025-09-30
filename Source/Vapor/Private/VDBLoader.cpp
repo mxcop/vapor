@@ -5,6 +5,7 @@
 #include "Interfaces/IPluginManager.h"
 #include "RenderGraphBuilder.h"
 #include "RenderGraphUtils.h"
+#include "Engine/VolumeTexture.h"
 
 THIRD_PARTY_INCLUDES_START
 #include "openvdb/openvdb.h"
@@ -15,7 +16,7 @@ constexpr uint32 NOISE_RESOLUTION_X = 128;
 constexpr uint32 NOISE_RESOLUTION_Y = 128;
 constexpr uint32 NOISE_RESOLUTION_Z = 128;
 
-FTextureRHIRef LoadAlligatorNoise() {
+UVolumeTexture* LoadAlligatorNoise() {
 	/* Init OpenVDB */
 	openvdb::initialize();
 
@@ -55,12 +56,11 @@ FTextureRHIRef LoadAlligatorNoise() {
 	const openvdb::FloatGrid::ConstAccessor AccessorA = LFCurlyWorley->getConstAccessor();
 
 	/* Create new volume texture asset */
-	// UVolumeTexture* Texture = NewObject<UVolumeTexture>(GetTransientPackage(), TEXT("Vapor_AlligatorNoise"));
+	UVolumeTexture* NewTexture = NewObject<UVolumeTexture>(GetTransientPackage(), "Noise Texture");
 
 	/* Initialize the volume texture */
-	// Texture->Source.Init(NOISE_RESOLUTION_X, NOISE_RESOLUTION_Y, NOISE_RESOLUTION_Z, 1, TSF_BGRA8, nullptr);
-	// uint8* TextureData = Texture->Source.LockMip(0);
-	uint8* SourceData = new uint8[NOISE_RESOLUTION_X * NOISE_RESOLUTION_Y * NOISE_RESOLUTION_Z * 4];
+	NewTexture->Source.Init(NOISE_RESOLUTION_X, NOISE_RESOLUTION_Y, NOISE_RESOLUTION_Z, 1, TSF_BGRA8, nullptr);
+	uint8* TextureData = (uint8*)NewTexture->Source.LockMip(0);
 
 	for (uint32 z = 0; z < NOISE_RESOLUTION_Z; ++z) {
 		for (uint32 y = 0; y < NOISE_RESOLUTION_Y; ++y) {
@@ -73,32 +73,28 @@ FTextureRHIRef LoadAlligatorNoise() {
 
 				/* Set the value inside our resampled grid */
 				const int32 Index = x + (y * NOISE_RESOLUTION_X) + (z * NOISE_RESOLUTION_X * NOISE_RESOLUTION_Y);
-				SourceData[Index * 4 + 0] = (uint8)(ValueB * 255.0f);
-				SourceData[Index * 4 + 1] = (uint8)(ValueG * 255.0f);
-				SourceData[Index * 4 + 2] = (uint8)(ValueR * 255.0f);
-				SourceData[Index * 4 + 3] = (uint8)(ValueA * 255.0f);
+				TextureData[Index * 4 + 0] = (uint8)(ValueB * 255.0f);
+				TextureData[Index * 4 + 1] = (uint8)(ValueG * 255.0f);
+				TextureData[Index * 4 + 2] = (uint8)(ValueR * 255.0f);
+				TextureData[Index * 4 + 3] = (uint8)(ValueA * 255.0f);
 			}
 		}
 	}
 
-	FTextureRHIRef Texture;
+	/* Unlock the volume texture data */
+	NewTexture->Source.UnlockMip(0);
 
-	ENQUEUE_RENDER_COMMAND(CreateNoiseTexture)(
-	[&Texture, SourceData](FRHICommandListImmediate& RHICmdList) {
-		/* Create the noise texture */
-		FRHITextureCreateDesc Desc = FRHITextureCreateDesc::Create3D(TEXT("Alligator Texture"))
-			.SetExtent(NOISE_RESOLUTION_X, NOISE_RESOLUTION_Y)
-			.SetDepth(NOISE_RESOLUTION_Z)
-			.SetFormat(PF_B8G8R8A8)
-			.SetFlags(ETextureCreateFlags::ShaderResource);
-		Texture = RHICreateTexture(Desc);
+	/* Set all the volume texture settings */
+	NewTexture->MipGenSettings = TMGS_NoMipmaps;
+	NewTexture->CompressionSettings = TC_Default;
+	NewTexture->SRGB = false;
+	NewTexture->Filter = TF_Bilinear;
+	NewTexture->AddressMode = TA_Wrap;
 
-		/* Upload the noise data */
-		FUpdateTextureRegion3D UpdateRegion(0, 0, 0, 0, 0, 0, NOISE_RESOLUTION_X, NOISE_RESOLUTION_Y, NOISE_RESOLUTION_Z);
-		RHIUpdateTexture3D(Texture, 0, UpdateRegion, NOISE_RESOLUTION_X * 4, NOISE_RESOLUTION_X * NOISE_RESOLUTION_Y * 4, SourceData);
-		delete[] SourceData;
-	});
+	/* Update the volume texture resource */
+	NewTexture->UpdateResource();
+	NewTexture->CreateResource();
 
 	File.close(); /* Finally close the VDB file, and return */
-	return Texture;
+	return NewTexture;
 }

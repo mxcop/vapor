@@ -6,6 +6,9 @@ static const float3 VOLUME_RESOLUTION = float3(512, 512, 64);
 static const float3 VOLUME_SIZE = UNITS_PER_VOXEL * VOLUME_RESOLUTION;
 static const float3 HALF_VOLUME_SIZE = VOLUME_SIZE * 0.5;
 
+/// 4 types of noise packed into a single texture.
+Texture3D<float4> Noise;
+
 /// Sample taken from a cloud.
 struct CloudSample {
     float Value;
@@ -48,8 +51,15 @@ struct CloudInstance {
     Texture3D<float> SDFTexture;
 };
 
+float ValueErosion(const float Value, const float Erosion) {
+	const float InvErosion = (1.0 - Erosion);
+    return saturate((Value - Erosion) / InvErosion);
+}
+
 /// Sample the cloud.
-CloudSample SampleCloud(ConstantBuffer<CloudInstance> Cloud, const float3 UVW) {
+CloudSample SampleCloud(ConstantBuffer<CloudInstance> Cloud, const float3 Point) {
+    const float3 UVW = (Point - Cloud.Position) / HALF_VOLUME_SIZE * 0.5 + 0.5;
+    
     // Sample the Signed Distance Field.
     // The SDF is stored from -32 to 512 in a UNorm texture encoded in voxel-space.
     const float NormSDist = Cloud.SDFTexture.Sample(GlobalBilinearClampedSampler, UVW);
@@ -60,5 +70,12 @@ CloudSample SampleCloud(ConstantBuffer<CloudInstance> Cloud, const float3 UVW) {
     
     // We're inside the volume, so we fetch the density and return it instead.
     const float Density = Cloud.DensityTexture.Sample(GlobalBilinearClampedSampler, UVW);
-    return CloudSample::Inside(Density * Cloud.Density);
+    
+    const float WindOffset = float3(0.25, 0.4, 0.8) * View.GameTime * 0.1;
+    const float4 Erosion = Noise.Sample(GlobalBilinearWrappedSampler, (Point * 0.0001) - WindOffset);
+    const float BillowyFreqGradient = pow(Density, 0.25);
+    const float BillowyNoise = lerp(Erosion.b * 0.3, Erosion.a * 0.3, BillowyFreqGradient);
+    return CloudSample::Inside(ValueErosion(Density, BillowyNoise) * Cloud.Density);
+    
+    // return CloudSample::Inside(Density * Cloud.Density);
 }

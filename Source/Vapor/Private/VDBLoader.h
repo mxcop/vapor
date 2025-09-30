@@ -2,4 +2,4 @@
 
 #include "Rendering/SlateRenderer.h" /* FTextureRHIRef */
 
-FTextureRHIRef LoadAlligatorNoise();
+UVolumeTexture* LoadAlligatorNoise();

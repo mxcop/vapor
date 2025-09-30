@@ -30,7 +30,7 @@ class FVaporExtension : public FSceneViewExtensionBase {
 	FCloudscapeRenderData RenderData;
 	FTextureResource* DensityTexture = nullptr;
 	FTextureResource* SDFTexture = nullptr;
-	FTextureRHIRef NoiseTexture = nullptr;
+	UVolumeTexture* NoiseTexture = nullptr;
 	FCriticalSection RenderDataLock;
 
 	// Alligator Noise Texture
@@ -107,26 +107,26 @@ public:
 };
 
 // SH Bake shader.
-class FBakeShader : public FGlobalShader {
-public:
-	DECLARE_GLOBAL_SHADER(FBakeShader)
-
-	SHADER_USE_PARAMETER_STRUCT(FBakeShader, FGlobalShader)
-
-	BEGIN_SHADER_PARAMETER_STRUCT(FParameters, )
-		SHADER_PARAMETER_STRUCT_REF(FCloudscapeRenderData, Cloud)
-		SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture3D<float4>, OutputSH)
-	END_SHADER_PARAMETER_STRUCT()
-
-	// Basic shader initialization
-	static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters) {
-		return IsFeatureLevelSupported(Parameters.Platform, ERHIFeatureLevel::SM5);
-	}
-
-	// Define environment variables used by compute shader
-	static void ModifyCompilationEnvironment(const FGlobalShaderPermutationParameters& Parameters, FShaderCompilerEnvironment& OutEnvironment) {
-		OutEnvironment.SetDefine(TEXT("THREADS_X"), 4);
-		OutEnvironment.SetDefine(TEXT("THREADS_Y"), 4);
-		OutEnvironment.SetDefine(TEXT("THREADS_Z"), 4);
-	}
-};
+//class FBakeShader : public FGlobalShader {
+//public:
+//	DECLARE_GLOBAL_SHADER(FBakeShader)
+//
+//	SHADER_USE_PARAMETER_STRUCT(FBakeShader, FGlobalShader)
+//
+//	BEGIN_SHADER_PARAMETER_STRUCT(FParameters, )
+//		SHADER_PARAMETER_STRUCT_REF(FCloudscapeRenderData, Cloud)
+//		SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture3D<float4>, OutputSH)
+//	END_SHADER_PARAMETER_STRUCT()
+//
+//	// Basic shader initialization
+//	static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters) {
+//		return IsFeatureLevelSupported(Parameters.Platform, ERHIFeatureLevel::SM5);
+//	}
+//
+//	// Define environment variables used by compute shader
+//	static void ModifyCompilationEnvironment(const FGlobalShaderPermutationParameters& Parameters, FShaderCompilerEnvironment& OutEnvironment) {
+//		OutEnvironment.SetDefine(TEXT("THREADS_X"), 4);
+//		OutEnvironment.SetDefine(TEXT("THREADS_Y"), 4);
+//		OutEnvironment.SetDefine(TEXT("THREADS_Z"), 4);
+//	}
+//};

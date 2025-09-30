@@ -13,7 +13,7 @@
 
 IMPLEMENT_GLOBAL_SHADER(FCloudShader, "/Plugins/Vapor/CloudMarchCS.usf", "MainCS", SF_Compute);
 IMPLEMENT_GLOBAL_SHADER(FNoiseShader, "/Plugins/Vapor/NoiseGenCS.usf", "MainCS", SF_Compute);
-IMPLEMENT_GLOBAL_SHADER(FBakeShader, "/Plugins/Vapor/BakeAbsorptionCS.usf", "MainCS", SF_Compute);
+//IMPLEMENT_GLOBAL_SHADER(FBakeShader, "/Plugins/Vapor/BakeAbsorptionCS.usf", "MainCS", SF_Compute);
 
 IMPLEMENT_UNIFORM_BUFFER_STRUCT(FCloudscapeRenderData, "Cloud");
 
@@ -37,8 +37,6 @@ enum ERenderTarget {
 
 FVaporExtension::FVaporExtension(const FAutoRegister& AutoRegister) : FSceneViewExtensionBase(AutoRegister) {
 	UE_LOG(LogTemp, Log, TEXT("Vapor: Custom SceneViewExtension registered"));
-
-	NoiseTexture = LoadAlligatorNoise();
 
 	/* Fill the noise texture */
 	ENQUEUE_RENDER_COMMAND(AlligatorNoiseGeneration)(
@@ -106,6 +104,11 @@ void FVaporExtension::BeginRenderViewFamily(FSceneViewFamily& ViewFamily) {
 		if (DensityTexture == nullptr) DensityTexture = VaporInstance->GetComponent()->CloudAsset->DensityField->CreateResource();
 		SDFTexture = VaporInstance->GetComponent()->CloudAsset->SignedDistanceField->GetResource();
 		if (SDFTexture == nullptr) SDFTexture = VaporInstance->GetComponent()->CloudAsset->SignedDistanceField->CreateResource();
+	}
+
+	/* Initialize the noise texture if it's not initialized yet */
+	if (NoiseTexture == nullptr) {
+		NoiseTexture = LoadAlligatorNoise();
 	}
 
 	if (VaporInstance->GetComponent()->CloudAsset && PathDensityTexture.IsValid() == false) {
@@ -198,7 +201,7 @@ void FVaporExtension::PrePostProcessPass_RenderThread(FRDGBuilder& GraphBuilder,
 		PassParameters->Cloud = TUniformBufferRef<FCloudscapeRenderData>::CreateUniformBufferImmediate(RenderData, EUniformBufferUsage::UniformBuffer_SingleFrame);
 	}
 	PassParameters->View = InView.ViewUniformBuffer;
-	PassParameters->Noise = GraphBuilder.RegisterExternalTexture(CreateRenderTarget(NoiseTexture, TEXT("Noise Texture")));
+	PassParameters->Noise = GraphBuilder.RegisterExternalTexture(CreateRenderTarget(NoiseTexture->GetResource()->GetTextureRHI(), TEXT("Noise Texture")));
 	PassParameters->PathDensityTexture = GraphBuilder.CreateSRV(FRDGTextureSRVDesc(PathDensityTex));
 	PassParameters->SceneColor = SceneColor;
 	PassParameters->SceneDepth = SceneDepth;

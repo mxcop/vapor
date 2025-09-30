@@ -8,7 +8,6 @@ static const uint MAX_INDIRECT_STEPS = 256;
 // Cloud Parameters
 ConstantBuffer<CloudInstance> Cloud;
 
-Texture3D<float4> Noise;
 Texture3D<float4> PathDensityTexture;
 
 // Scene Textures
@@ -29,15 +28,8 @@ float CalcStepSize(const float Distance) {
     return max(Cloud.PrimaryNearStep, sqrt(Distance) * Cloud.PrimaryStepPerDistance);
 }
 
-float ValueErosion(const float Value, const float Erosion) {
-	const float InvErosion = (1.0 - Erosion);
-    return saturate((Value - Erosion) / InvErosion);
-}
-
 CloudSample SampleVolume(const float3 Point) {
-    const float3 UVW = (Point - Cloud.Position) / HALF_VOLUME_SIZE * 0.5 + 0.5;
-    const CloudSample Sample = SampleCloud(Cloud, UVW);
-    return Sample;
+    return SampleCloud(Cloud, Point);
     //if (Sample.IsOutside()) return Sample;
     //const float WindOffset = float3(0.25, 0.4, 0.8) * View.GameTime * 0.1;
     //const float4 Erosion = Noise.Sample(GlobalBilinearWrappedSampler, (Point * 0.0001) - WindOffset);
