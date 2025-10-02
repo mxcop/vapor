@@ -39,6 +39,8 @@ class UVaporComponent : public UPrimitiveComponent {
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cloudscape")
 	bool Debug = false;
+
+	void IntoRenderData(class FCloudscapeRenderData& RenderData) const;
 };
 
 /* Vapor Instance Actor */

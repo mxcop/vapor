@@ -55,14 +55,7 @@ void FVaporExtension::BeginRenderViewFamily(FSceneViewFamily& ViewFamily) {
 	Data.SunDir = -(FVector3f)SunInstance->GetComponent()->GetDirection();
 	Data.SunLuminance = (FVector3f)SunInstance->GetComponent()->GetColoredLightBrightness();
 	if (SkyInstance) Data.SunLuminance *= (FVector3f)SkyInstance->GetComponent()->GetAtmosphereTransmitanceOnGroundAtPlanetTop(SunInstance->GetComponent());
-	Data.Absorption = VaporInstance->GetComponent()->Absorption;
-	Data.Density = VaporInstance->GetComponent()->Density;
-	Data.PrimaryNearStep = VaporInstance->GetComponent()->PrimaryNearStep;
-	Data.PrimaryStepPerDistance = VaporInstance->GetComponent()->PrimaryStepPerDistance;
-	Data.PrimaryMinSDFStep = VaporInstance->GetComponent()->PrimaryMinSDFStep;
-	Data.SecondaryStep = VaporInstance->GetComponent()->SecondaryStep;
-	Data.SecondaryExtinctThreshold = VaporInstance->GetComponent()->SecondaryExtinctThreshold;
-	Data.NoiseFreq = VaporInstance->GetComponent()->NoiseFrequency;
+	VaporInstance->GetComponent()->IntoRenderData(Data);
 
 	{ /* Lock and update the render data */
 		FScopeLock Lock(&RenderDataLock);
@@ -81,9 +74,6 @@ void FVaporExtension::BeginRenderViewFamily(FSceneViewFamily& ViewFamily) {
 	/* Initialize the noise texture if it's not initialized yet */
 	if (NoiseTexture == nullptr) {
 		NoiseTexture = LoadAlligatorNoise();
-	}
-	if (NoiseTexture->GetResource() == nullptr) {
-		NoiseTexture->CreateResource();
 	}
 }
 
