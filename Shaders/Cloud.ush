@@ -1,5 +1,8 @@
+#pragma once
+
 #include "/Engine/Public/Platform.ush"
 #include "/Engine/Private/Common.ush"
+#include "Common.ush"
 
 static const float UNITS_PER_VOXEL = 800.0; // 8 m
 static const float3 VOLUME_RESOLUTION = float3(512, 512, 64);
@@ -27,6 +30,11 @@ struct CloudSample {
     inline float SDist() { return Value; }
 };
 
+struct RoughSample {
+    float SDist;
+    float Density;
+};
+
 /// Collection of data required to render a cloud.
 struct CloudInstance {
     // Volume Data
@@ -37,11 +45,16 @@ struct CloudInstance {
     // Light Data
     float3 SunDir;
     float3 SunLuminance;
+    float3 AmbientFlux;
         
     // Primary Ray Options
     float PrimaryNearStep;
     float PrimaryStepPerDistance;
     float PrimaryMinSDFStep;
+    
+    uint DirectScattering;
+    uint MultiScattering;
+    uint AmbientScattering;
     
     // Secondary Ray Options
     float SecondaryStep;
@@ -80,8 +93,28 @@ CloudSample SampleCloud(ConstantBuffer<CloudInstance> Cloud, const float3 Point)
     const float DimensionalProfile = min(1.0, -SDist / UNITS_PER_VOXEL * 0.5);
     const float BillowyFreqGradient = pow(DimensionalProfile, 0.25);
     const float BillowyNoise = lerp(NoiseSample.b * 0.3, NoiseSample.r * 0.3, BillowyFreqGradient);
-    
-    return CloudSample::Inside(ValueErosion(Density, BillowyNoise) * Cloud.Density);
-    
+
+    float ErodedDensity = ValueErosion(Density, BillowyNoise);
+    // Modify User density scale
+    float powered_density_scale = pow(saturate(Cloud.Density), 4.0);
+    // Apply User Density Scale Data to Result
+    ErodedDensity *= powered_density_scale;
+    // Sharpen result and lower Density close to camera to both add details and reduce undersampling noise
+    ErodedDensity = pow(ErodedDensity, lerp(0.3, 0.6, max(0.00001, powered_density_scale)));
+    return CloudSample::Inside(ErodedDensity);
     // return CloudSample::Inside(Density * Cloud.Density);
+}
+
+RoughSample SampleCloudRough(ConstantBuffer<CloudInstance> Cloud, const float3 Point) {
+    const float3 UVW = (Point - Cloud.Position) / HALF_VOLUME_SIZE * 0.5 + 0.5;
+    RoughSample Sample;
+    
+    // Sample the Signed Distance Field.
+    // The SDF is stored from -32 to 512 in a UNorm texture encoded in voxel-space.
+    const float NormSDist = Cloud.SDFTexture.Sample(GlobalBilinearClampedSampler, UVW);
+    Sample.SDist = (NormSDist * (32.0 + 512.0) - 32.0) * UNITS_PER_VOXEL;
+    
+    // We're inside the volume, so we fetch the density and return it instead.
+    Sample.Density = Cloud.DensityTexture.Sample(GlobalBilinearClampedSampler, UVW);
+    return Sample;
 }

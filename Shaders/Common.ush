@@ -1,3 +1,5 @@
+#pragma once
+
 #include "/Engine/Public/Platform.ush"
 #include "/Engine/Private/Common.ush"
 

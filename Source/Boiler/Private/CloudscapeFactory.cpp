@@ -63,7 +63,7 @@ float Remap(float Value, float InMin, float InMax, float OutMin, float OutMax) {
 	return OutMin + (Clamped * (OutMax - OutMin));
 }
 
-openvdb::FloatGrid::Ptr ResampleGrid(const openvdb::BBoxd& WorldAABB, const openvdb::FloatGrid& Grid, const uint32 X, const uint32 Y, const uint32 Z) {
+openvdb::FloatGrid::Ptr ResampleGrid(const openvdb::BBoxd& WorldAABB, const openvdb::FloatGrid& Grid, const openvdb::FloatGrid::Ptr ScaleGrid, const uint32 X, const uint32 Y, const uint32 Z) {
 	/* Find the step size to use for resampling the grid */
 	const openvdb::Vec3d StepSizes = WorldAABB.extents() / openvdb::Vec3d(X, Z, Y);
 	const double StepSize = std::max(std::max(StepSizes.x(), StepSizes.y()), StepSizes.z());
@@ -79,24 +79,38 @@ openvdb::FloatGrid::Ptr ResampleGrid(const openvdb::BBoxd& WorldAABB, const open
 
 	/* Pre-filter the input grid for down-sampling */
 	openvdb::FloatGrid::Ptr Filtered = Grid.deepCopy();
+	openvdb::FloatGrid::Ptr FilteredScale = ScaleGrid ? ScaleGrid->deepCopy() : nullptr;
 	if (LargestScaleFactor >= 2.0f) {
 		openvdb::tools::Filter<openvdb::FloatGrid> Filter(*Filtered);
 		Filter.gaussian((int)LargestScaleFactor / 2, 1);
+		if (FilteredScale != nullptr) {
+			openvdb::tools::Filter<openvdb::FloatGrid> FilterScale(*FilteredScale);
+			FilterScale.gaussian((int)LargestScaleFactor / 2, 1);
+		}
 	}
 
 	/* Create a box grid sampler for the input grid */
-	const openvdb::tools::GridSampler<openvdb::FloatGrid, openvdb::tools::BoxSampler> sampler(*Filtered);
+	const openvdb::tools::GridSampler<openvdb::FloatGrid, openvdb::tools::BoxSampler> Sampler(*Filtered);
 
 	/* Resample the pre-filtered grid */
 	for (uint32 z = 0; z < Z; ++z) {
 		for (uint32 y = 0; y < Y; ++y) {
 			for (uint32 x = 0; x < X; ++x) {
 				/* Sample the pre-filtered grid */
-				const float Value = sampler.wsSample(openvdb::Vec3d(
+				float Value = Sampler.wsSample(openvdb::Vec3d(
 					WorldAABB.min().x() + x * StepSizes.x(),
 					WorldAABB.min().y() + z * StepSizes.y(),
 					WorldAABB.min().z() + y * StepSizes.z()
 				));
+
+				if (ScaleGrid != nullptr) {
+					const openvdb::tools::GridSampler<openvdb::FloatGrid, openvdb::tools::BoxSampler> ScaleSampler(*FilteredScale);
+					Value *= ScaleSampler.wsSample(openvdb::Vec3d(
+						WorldAABB.min().x() + x * StepSizes.x(),
+						WorldAABB.min().y() + z * StepSizes.y(),
+						WorldAABB.min().z() + y * StepSizes.z()
+					));
+				}
 
 				/* Set the value inside our resampled grid */
 				Accessor.setValue(openvdb::Coord(x, y, z), Value);
@@ -204,15 +218,18 @@ UVaporCloud* UCloudscapeFactory::CreateVolumeTextureFromVDB(const FString& Filen
 	}
 
 	/* Just grab the first grid in the file for now */
-	openvdb::GridBase::Ptr BaseGrid = File.getGrids()->front();
+	openvdb::FloatGrid::Ptr ProfileGrid = openvdb::gridPtrCast<openvdb::FloatGrid>(File.getGrids()->front());
+	openvdb::FloatGrid::Ptr ScaleGrid = nullptr;
 	for (uint32 i = 0; i < File.getGrids()->size(); ++i) {
 		const openvdb::GridBase::Ptr Grid = File.getGrids()->at(i);
 		if (Grid->getName() == "dimensional_profile") {
-			BaseGrid = Grid;
+			ProfileGrid = openvdb::gridPtrCast<openvdb::FloatGrid>(Grid);
+		}
+		if (Grid->getName() == "density_scale") {
+			ScaleGrid = openvdb::gridPtrCast<openvdb::FloatGrid>(Grid);
 		}
 		UE_LOG(LogTemp, Warning, TEXT("VDB Grid: %s"), UTF8_TO_TCHAR(File.getGrids()->at(i)->getName().c_str()));
 	}
-	const openvdb::FloatGrid::Ptr DensityGrid = openvdb::gridPtrCast<openvdb::FloatGrid>(BaseGrid);
 
 	/* Find the AABB of all the grids */
 	openvdb::BBoxd WorldAABB = openvdb::BBoxd();
@@ -223,7 +240,7 @@ UVaporCloud* UCloudscapeFactory::CreateVolumeTextureFromVDB(const FString& Filen
 	}
 
 	/* Make sure our grid is a float grid */
-	if (!DensityGrid) {
+	if (!ProfileGrid) {
 		UE_LOG(LogTemp, Error, TEXT("Grid in VDB file is not a float grid"));
 		return nullptr;
 	}
@@ -240,7 +257,7 @@ UVaporCloud* UCloudscapeFactory::CreateVolumeTextureFromVDB(const FString& Filen
 	UVolumeTexture& SDFTexture = *CloudData->SignedDistanceField;
 
 	/* Resample the density field */
-	const openvdb::FloatGrid::Ptr ResampledGrid = ResampleGrid(WorldAABB, *DensityGrid, VTEX_X, VTEX_Y, VTEX_Z);
+	const openvdb::FloatGrid::Ptr ResampledGrid = ResampleGrid(WorldAABB, *ProfileGrid, ScaleGrid, VTEX_X, VTEX_Y, VTEX_Z);
 
 	/* Create the volume textures from the resampled density field */
 	CreateDensityTexture(DensityTexture, *ResampledGrid);

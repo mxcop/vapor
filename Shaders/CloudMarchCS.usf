@@ -51,7 +51,7 @@ float HenyeyGreenstein(float VdotL, float G) {
 }
 
 /// Trace the scene, find out how much light is being absorped.
-float3 TraceAbsorption(const float3 Origin, const float3 Dir, const float PathDensityThreshold) {
+float3 TraceAbsorption(const float3 Origin, const float3 Dir, const float SunDot, const float PathDensityThreshold) {
     // Intersect the bounds of the volume, return early if we miss.
     const float2 BoundsIntersection = RayAABB(Origin, Dir, Cloud.Position - HALF_VOLUME_SIZE, Cloud.Position + HALF_VOLUME_SIZE);
     
@@ -75,16 +75,19 @@ float3 TraceAbsorption(const float3 Origin, const float3 Dir, const float PathDe
         
         // We're inside the volume, accumulate density.
         PathDensity += Sample.Density() * Cloud.SecondaryStep;
-        // if (PathDensity > PathDensityThreshold) break;
+        if (PathDensity > PathDensityThreshold) break;
     }
     
-    // Sample path density from baked spherical harmonics.
-    //const float3 UVW = (Origin - Cloud.Position) / CLOUD_BOUNDS * 0.5 + 0.5;
-    //const float4 SH1 = PathDensityTexture.Sample(GlobalBilinearClampedSampler, UVW);
-    //const float PathDensity = Cloud.Density * (SH1.x + dot(SH1.yzw, Dir) * 3.0);
-    
     // Beer's Law <https://en.wikipedia.org/wiki/Beer%E2%80%93Lambert_law>
-    const float3 Absorption = exp(-Cloud.Absorption * PathDensity);
+    float3 Absorption = exp(-Cloud.Absorption * PathDensity);
+    
+    // Multi-scatter approximation.
+    if (Cloud.MultiScattering) {
+        const RoughSample Sample = SampleCloudRough(Cloud, Origin);
+        const float3 MsVolume = exp(-Cloud.Absorption * PathDensity * Remap(SunDot, 0.0, 0.9, Remap(Sample.SDist, 0.0, -16.0 * UNITS_PER_VOXEL, 0.05, 0.25), 0.25));
+        Absorption += MsVolume;
+    }
+    
     return Absorption;
 }
 
@@ -103,7 +106,8 @@ float3 TraceVolume(const float3 ViewColor, const float3 Origin, const float3 Dir
     const float PathDensityThreshold = CalcPathDensityThreshold(Cloud.SecondaryExtinctThreshold);
     
     // Sun out-scattering will be identical everywhere along the ray, so we pre-calculate it.
-    const float3 Scattering = Cloud.SunLuminance * HenyeyGreenstein(dot(Dir, Cloud.SunDir), 0.2);
+    const float SunDot = dot(Dir, Cloud.SunDir);
+    const float3 Scattering = Cloud.SunLuminance * HenyeyGreenstein(SunDot, 0.2);
     
     // Integrate luminance along the ray.
     for (uint s = 0; s < MAX_DIRECT_STEPS; ++s) {
@@ -135,7 +139,16 @@ float3 TraceVolume(const float3 ViewColor, const float3 Origin, const float3 Dir
         PathDensity += StepDensity;
         
         // Integrate direct out-scattering from the sun. 
-        Luminance += TraceAbsorption(SamplePos, Cloud.SunDir, PathDensityThreshold) * Scattering * StepDensity * (1.0 - Absorption);
+        if (Cloud.DirectScattering) {
+            Luminance += TraceAbsorption(SamplePos, Cloud.SunDir, SunDot, PathDensityThreshold) * Scattering * StepDensity * (1.0 - Absorption);
+        }
+        
+        // Integrate ambient out-scattering.
+        if (Cloud.AmbientScattering) {
+            const RoughSample Sample = SampleCloudRough(Cloud, Origin);
+            const float DimensionalProfile = min(1.0, -Sample.SDist / UNITS_PER_VOXEL * 0.5);
+            Luminance += StepDensity * pow(1.0 - DimensionalProfile, 0.5) * Cloud.AmbientFlux;
+        }
     }
     
     // Beer's Law <https://en.wikipedia.org/wiki/Beer%E2%80%93Lambert_law>

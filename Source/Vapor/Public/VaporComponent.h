@@ -17,6 +17,9 @@ class UVaporComponent : public UPrimitiveComponent {
 	FVector3f Absorption = FVector3f(1.2f, 1.0f, 0.9f);
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cloudscape")
+	FVector3f AmbientFlux = FVector3f(0.01f, 0.01f, 0.01f);
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cloudscape")
 	float Density = 0.02f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cloudscape")
@@ -27,6 +30,13 @@ class UVaporComponent : public UPrimitiveComponent {
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cloudscape")
 	float PrimaryMinSDFStep = 300.0f; // cm
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cloudscape")
+	bool DirectScattering = true;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cloudscape")
+	bool MultiScattering = true;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cloudscape")
+	bool AmbientScattering = true;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cloudscape")
 	float SecondaryStep = 800.0f; // cm
