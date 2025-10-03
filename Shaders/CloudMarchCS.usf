@@ -12,11 +12,16 @@ ConstantBuffer<CloudInstance> Cloud;
 Texture2D<float3> SceneColor;
 Texture2D<float> SceneDepth;
 
+Texture3D<float> DensityCacheDataSRV;
+RWTexture3D<float> DensityCacheData;
+RWTexture3D<uint> DensityCacheFlags;
+
 // Output Texture
 RWTexture2D<float4> Output;
 
 #if DEBUG
 static int STEP_COUNT = 0;
+static int STEP_COUNT2 = 0;
 #endif
 
 /// Calculate the threshold path density at which the absorption reaches a given threshold.
@@ -50,6 +55,29 @@ float HenyeyGreenstein(float VdotL, float G) {
     return num * rsqrt_denom * rsqrt_denom * rsqrt_denom * 0.07957747154594766788444188168626;
 }
 
+//struct CacheValue {
+//    uint Value;
+//    bool HasValue() { return (Value & 0x80000000) != 0x00; }
+//    uint GetValue() { return Value & 0x7FFFFFFF; }
+//};
+
+//CacheValue CacheFetch(const uint3 Index, const bool Leaching) {
+//    CacheValue Value;
+//    // If we are leaching off the cache, just fetch the data regardless of whether its filled.
+//    if (Leaching) {
+//        Value.Value = CacheTexture[Index];
+//        return Value;
+//    }
+//    // Otherwise, we atomic or the value, to claim the slot in case its empty.
+//    InterlockedOr(CacheTexture[Index], 0x80000000, Value.Value);
+//    return Value;
+//}
+
+//void CacheWrite(const uint3 Index, const uint Value) {
+//    // Write out to the cache, make sure to keep the filled bit set.
+//    CacheTexture[Index] = 0x80000000 | Value;
+//}
+
 /// Trace the scene, find out how much light is being absorped.
 float3 TraceAbsorption(const float3 Origin, const float3 Dir, const float SunDot, const float PathDensityThreshold) {
     // Intersect the bounds of the volume, return early if we miss.
@@ -57,26 +85,100 @@ float3 TraceAbsorption(const float3 Origin, const float3 Dir, const float SunDot
     
     // Traversal variables.
     float Distance = max(0.0, BoundsIntersection.x);
-    float PathDensity = 0.0;
     
-    for (uint s = 0; s < MAX_INDIRECT_STEPS; ++s) {
-        if (Distance >= BoundsIntersection.y) break;
+    float PathDensity = 0.0;
+    //for (uint s = 0; s < 3; ++s) {
+    //    // Sample the volume.
+    //    const float3 SamplePos = Origin + Dir * Distance;
+    //    const CloudSample Sample = SampleVolume(SamplePos);
         
-        // Sample the volume.
-        const float3 SamplePos = Origin + Dir * Distance;
-        const CloudSample Sample = SampleVolume(SamplePos);
+    //    // No work to be done outside the volume, just keep stepping.
+    //    if (Sample.IsOutside()) {
+    //        Distance += max(Cloud.PrimaryMinSDFStep, Sample.SDist()); // Move along the ray to the next location.
+    //        continue;
+    //    }
+    //    Distance += Cloud.SecondaryStep;
         
-        // No work to be done outside the volume, just keep stepping.
-        if (Sample.IsOutside()) {
-            Distance += max(Cloud.PrimaryMinSDFStep, Sample.SDist()); // Move along the ray to the next location.
-            continue;
+    //    // We're inside the volume, accumulate density.
+    //    PathDensity += Sample.Density() * Cloud.SecondaryStep;
+    //    if (PathDensity > PathDensityThreshold) break;
+    //}
+    
+    // Sample the cache.
+    const float3 UVW = ((Origin + Dir * Distance) - Cloud.Position) / HALF_VOLUME_SIZE * 0.5 + 0.5;
+    const uint3 CacheIndex = (uint3)(UVW * VOLUME_RESOLUTION);
+    const uint3 FlagsIndex = CacheIndex >> uint3(2, 2, 1);
+    const uint3 FlagIndex = CacheIndex & uint3(3, 3, 1);
+    const uint FlagMask = 1 << (FlagIndex.x + FlagIndex.y * 4 + FlagIndex.z * 4 * 4);
+    uint Flag;
+    InterlockedOr(DensityCacheFlags[FlagsIndex], FlagMask, Flag);
+    if (Flag & FlagMask) { // Cache slot is already filled.
+        const float CacheData = DensityCacheDataSRV.Sample(GlobalBilinearClampedSampler, UVW);
+        PathDensity = Remap(CacheData, 0.0f, 1.0f, 0.0f, 16.0f);
+#if DEBUG
+        STEP_COUNT2++;
+#endif
+    } else { // Cache slot is not filled yet.
+        for (uint s = 0; s < MAX_INDIRECT_STEPS; ++s) {
+            if (Distance >= BoundsIntersection.y) break;
+        
+            // Sample the volume.
+            const float3 SamplePos = Origin + Dir * Distance;
+            const CloudSample Sample = SampleVolume(SamplePos);
+        
+            // No work to be done outside the volume, just keep stepping.
+            if (Sample.IsOutside()) {
+                Distance += max(Cloud.PrimaryMinSDFStep, Sample.SDist()); // Move along the ray to the next location.
+                continue;
+            }
+            Distance += Cloud.SecondaryStep;
+        
+            // We're inside the volume, accumulate density.
+            PathDensity += Sample.Density() * Cloud.SecondaryStep;
+            if (PathDensity > PathDensityThreshold) break;
         }
-        Distance += Cloud.SecondaryStep;
-        
-        // We're inside the volume, accumulate density.
-        PathDensity += Sample.Density() * Cloud.SecondaryStep;
-        if (PathDensity > PathDensityThreshold) break;
+#if DEBUG
+        STEP_COUNT++;
+#endif
+        DensityCacheData[CacheIndex] = Remap(PathDensity, 0.0f, 16.0f, 0.0f, 1.0f);
     }
+    
+//    const float3 UVW = ((Origin + Dir * Distance) - Cloud.Position) / HALF_VOLUME_SIZE * 0.5 + 0.5;
+//    const uint3 CacheIndex = (uint3) (UVW * VOLUME_RESOLUTION);
+//    const CacheValue CacheRead = CacheFetch(CacheIndex, false);
+    
+//    if (CacheRead.HasValue() == false) {
+//        for (uint s = 0; s < MAX_INDIRECT_STEPS; ++s) {
+//            if (Distance >= BoundsIntersection.y) break;
+        
+//            // Sample the volume.
+//            const float3 SamplePos = Origin + Dir * Distance;
+//            const CloudSample Sample = SampleVolume(SamplePos);
+        
+//            // No work to be done outside the volume, just keep stepping.
+//            if (Sample.IsOutside()) {
+//                Distance += max(Cloud.PrimaryMinSDFStep, Sample.SDist()); // Move along the ray to the next location.
+//                continue;
+//            }
+//            Distance += Cloud.SecondaryStep;
+        
+//            // We're inside the volume, accumulate density.
+//            PathDensity += Sample.Density() * Cloud.SecondaryStep;
+//            if (PathDensity > PathDensityThreshold) break;
+//        }
+        
+//#if DEBUG
+//        STEP_COUNT++;
+//#endif
+        
+//        CacheWrite(CacheIndex, (uint)Remap(PathDensity, 0.0f, 16.0f, 0.0f, 2147483647.0f));
+//    } else {
+//        PathDensity += Remap((float)CacheRead.GetValue(), 0.0f, 2147483647.0f, 0.0f, 16.0f);
+        
+//#if DEBUG
+//        STEP_COUNT2++;
+//#endif
+//    }
     
     // Beer's Law <https://en.wikipedia.org/wiki/Beer%E2%80%93Lambert_law>
     float3 Absorption = exp(-Cloud.Absorption * PathDensity);
@@ -112,10 +214,6 @@ float3 TraceVolume(const float3 ViewColor, const float3 Origin, const float3 Dir
     // Integrate luminance along the ray.
     for (uint s = 0; s < MAX_DIRECT_STEPS; ++s) {
         if (Distance >= BoundsIntersection.y) break;
-        
-#if DEBUG
-        STEP_COUNT++;
-#endif
         
         // Sample the volume at the current location.
         const float3 SamplePos = Origin + Dir * Distance;
@@ -182,7 +280,7 @@ void MainCS(uint2 DispatchThreadId : SV_DispatchThreadID) {
     const float3 FinalColor = TraceVolume(SceneColor[Pixel], RayOrigin, RayDirection);
     
 #if DEBUG
-    Output[Pixel] = float4((float)STEP_COUNT / (float)MAX_DIRECT_STEPS, 0.0, 0.0, 1.0);
+    Output[Pixel] = float4((float)STEP_COUNT / (float)MAX_DIRECT_STEPS, (float)STEP_COUNT2 / (float)MAX_DIRECT_STEPS, 0.0, 1.0);
 #else
     Output[Pixel] = float4(FinalColor, 1.0);
 #endif

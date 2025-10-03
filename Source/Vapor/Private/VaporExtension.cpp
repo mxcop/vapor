@@ -10,6 +10,7 @@
 #include "Misc/Optional.h"
 #include "VaporCloud.h"
 #include "VDBLoader.h"
+#include <RenderTargetPool.h>
 
 IMPLEMENT_GLOBAL_SHADER(FCloudShader, "/Plugins/Vapor/CloudMarchCS.usf", "MainCS", SF_Compute);
 IMPLEMENT_GLOBAL_SHADER(FNoiseShader, "/Plugins/Vapor/NoiseGenCS.usf", "MainCS", SF_Compute);
@@ -36,6 +37,23 @@ enum ERenderTarget {
 
 FVaporExtension::FVaporExtension(const FAutoRegister& AutoRegister) : FSceneViewExtensionBase(AutoRegister) {
 	UE_LOG(LogTemp, Log, TEXT("Vapor: Custom SceneViewExtension registered"));
+
+	//ENQUEUE_RENDER_COMMAND(DensityCacheSetup)(
+	//[this](FRHICommandListImmediate& RHICmdList) {
+	//	/* Create the density cache texture */
+	//	FRHITextureCreateDesc Desc = FRHITextureCreateDesc::Create3D(TEXT("Density Cache Texture"))
+	//		.SetExtent(512, 512)
+	//		.SetDepth(64)
+	//		.SetFormat(PF_R8_UINT)
+	//		.SetFlags(ETextureCreateFlags::UAV | ETextureCreateFlags::ShaderResource)
+	//		.SetInitialState(ERHIAccess::UAVCompute);
+	//	FTextureRHIRef CacheTexture = RHICreateTexture(Desc);
+	//	PersistentCache = CreateRenderTarget(CacheTexture, TEXT("Density Cache Texture"));
+	//	FRDGBuilder GraphBuilder(RHICmdList);
+	//	DensityCache = GraphBuilder.CreateUAV(FRDGTextureUAVDesc(GraphBuilder.RegisterExternalTexture(CacheRenderTarget, ERDGTextureFlags::MultiFrame)));
+	//	GraphBuilder.Execute();
+	//});
+	//FlushRenderingCommands();
 }
 
 void FVaporExtension::BeginRenderViewFamily(FSceneViewFamily& ViewFamily) {
@@ -94,7 +112,32 @@ void FVaporExtension::PrePostProcessPass_RenderThread(FRDGBuilder& GraphBuilder,
 	FRDGTexture* SceneColor = Inputs.SceneTextures->GetContents()->SceneColorTexture;
 	FRDGTexture* SceneDepth = Inputs.SceneTextures->GetContents()->SceneDepthTexture;
 	const FIntPoint ViewSize = SceneColor->Desc.Extent;
-	
+
+	if (!PersistentCacheData.IsValid() || !PersistentCacheFlags.IsValid()) {
+		// 8 bits per cache slot.
+		const FPooledRenderTargetDesc CacheDataDesc = FPooledRenderTargetDesc::CreateVolumeDesc(
+			512, 512, 64, PF_R8, FClearValueBinding::None,
+			TexCreate_None, TexCreate_ShaderResource | TexCreate_UAV, false
+		);
+		GRenderTargetPool.FindFreeElement(
+			FRHICommandListExecutor::GetImmediateCommandList(),
+			CacheDataDesc,
+			PersistentCacheData,
+			TEXT("Density Cache Data Texture")
+		);
+		// 1 bit per cache slot.
+		const FPooledRenderTargetDesc CacheFlagsDesc = FPooledRenderTargetDesc::CreateVolumeDesc(
+			512 / 4, 512 / 4, 64 / 2, PF_R32_UINT, FClearValueBinding::None,
+			TexCreate_None, TexCreate_ShaderResource | TexCreate_UAV, false
+		);
+		GRenderTargetPool.FindFreeElement(
+			FRHICommandListExecutor::GetImmediateCommandList(),
+			CacheFlagsDesc,
+			PersistentCacheFlags,
+			TEXT("Density Cache Flags Texture")
+		);
+	}
+
 	/* Target texture creation info */
 	FRDGTextureDesc OutputDesc {};
 	OutputDesc = SceneColor->Desc;
@@ -119,6 +162,10 @@ void FVaporExtension::PrePostProcessPass_RenderThread(FRDGBuilder& GraphBuilder,
 	PassParameters->Noise = GraphBuilder.RegisterExternalTexture(CreateRenderTarget(NoiseTexture->GetResource()->GetTextureRHI(), TEXT("Noise Texture")));
 	PassParameters->SceneColor = SceneColor;
 	PassParameters->SceneDepth = SceneDepth;
+	FRDGTextureRef FRDGCacheData = GraphBuilder.RegisterExternalTexture(PersistentCacheData, ERDGTextureFlags::MultiFrame);
+	PassParameters->DensityCacheDataSRV = GraphBuilder.CreateSRV(FRDGCacheData);
+	PassParameters->DensityCacheData = GraphBuilder.CreateUAV(FRDGCacheData);
+	PassParameters->DensityCacheFlags = GraphBuilder.CreateUAV(GraphBuilder.RegisterExternalTexture(PersistentCacheFlags, ERDGTextureFlags::MultiFrame));
 	PassParameters->Output = GraphBuilder.CreateUAV(FRDGTextureUAVDesc(OutputTexture));
 
 	/* Calculate the group count based on the viewport size */

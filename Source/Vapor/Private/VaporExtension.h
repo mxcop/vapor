@@ -38,6 +38,10 @@ class FVaporExtension : public FSceneViewExtensionBase {
 	UVolumeTexture* NoiseTexture = nullptr;
 	FCriticalSection RenderDataLock;
 
+	// Cache UAV Textures
+	TRefCountPtr<IPooledRenderTarget> PersistentCacheData;
+	TRefCountPtr<IPooledRenderTarget> PersistentCacheFlags;
+
 	bool DebugMode = false;
 
 public:
@@ -67,6 +71,9 @@ public:
 		SHADER_PARAMETER_RDG_TEXTURE(Texture3D, Noise)
 		SHADER_PARAMETER_RDG_TEXTURE(Texture2D, SceneColor)
 		SHADER_PARAMETER_RDG_TEXTURE(Texture2D, SceneDepth)
+		SHADER_PARAMETER_RDG_TEXTURE_SRV(Texture3D, DensityCacheDataSRV)
+		SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture3D, DensityCacheData)
+		SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture3D, DensityCacheFlags)
 		SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D<float4>, Output)
 	END_SHADER_PARAMETER_STRUCT()
 
