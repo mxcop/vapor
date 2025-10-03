@@ -134,6 +134,10 @@ float3 TraceVolume(const float3 ViewColor, const float3 Origin, const float3 Dir
         
         // Integrate the absorption along the ray.
         Absorption = saturate(Absorption + StepDensity * (1.0 - Absorption));
+        if (Absorption > 0.999) {
+            Absorption = 1.0;
+            break;
+        }
         
         // Integrate density along the ray.
         PathDensity += StepDensity;
@@ -146,16 +150,16 @@ float3 TraceVolume(const float3 ViewColor, const float3 Origin, const float3 Dir
         // Integrate ambient out-scattering.
         if (Cloud.AmbientScattering) {
             const RoughSample Sample = SampleCloudRough(Cloud, Origin);
-            const float DimensionalProfile = min(1.0, -Sample.SDist / UNITS_PER_VOXEL * 0.5);
+            const float DimensionalProfile = min(1.0, -Sample.SDist / UNITS_PER_VOXEL * 0.2);
             Luminance += StepDensity * pow(1.0 - DimensionalProfile, 0.5) * Cloud.AmbientFlux;
         }
     }
     
     // Beer's Law <https://en.wikipedia.org/wiki/Beer%E2%80%93Lambert_law>
-    const float3 PathAbsorption = exp(-Cloud.Absorption * PathDensity);
+    // const float3 PathAbsorption = exp(-Cloud.Absorption * PathDensity);
     
     // Finally, combine the view color with the luminance based on the absorption.
-    return ViewColor * PathAbsorption + Luminance;
+    return ViewColor * (1.0 - Absorption) + Luminance;
 }
 
 // Compute Shader code

@@ -66,10 +66,10 @@ UVolumeTexture* LoadAlligatorNoise() {
 		for (uint32 y = 0; y < NOISE_RESOLUTION_Y; ++y) {
 			for (uint32 x = 0; x < NOISE_RESOLUTION_X; ++x) {
 				/* Sample the noise grid */
-				const float ValueR = AccessorR.getValue(openvdb::Coord(x, y, z));
-				const float ValueG = AccessorG.getValue(openvdb::Coord(x, y, z));
-				const float ValueB = AccessorB.getValue(openvdb::Coord(x, y, z));
-				const float ValueA = AccessorA.getValue(openvdb::Coord(x, y, z));
+				const float ValueR = AccessorR.getValue(openvdb::Coord(x, z, y));
+				const float ValueG = AccessorG.getValue(openvdb::Coord(x, z, y));
+				const float ValueB = AccessorB.getValue(openvdb::Coord(x, z, y));
+				const float ValueA = AccessorA.getValue(openvdb::Coord(x, z, y));
 
 				/* Set the value inside our resampled grid */
 				const int32 Index = x + (y * NOISE_RESOLUTION_X) + (z * NOISE_RESOLUTION_X * NOISE_RESOLUTION_Y);
@@ -86,7 +86,8 @@ UVolumeTexture* LoadAlligatorNoise() {
 
 	/* Set all the volume texture settings */
 	NewTexture->MipGenSettings = TMGS_NoMipmaps;
-	NewTexture->CompressionSettings = TC_Default;
+	//NewTexture->CompressionSettings = TC_BC7;
+	NewTexture->CompressionNone = true;
 	NewTexture->SRGB = false;
 	NewTexture->Filter = TF_Bilinear;
 	NewTexture->AddressMode = TA_Wrap;
