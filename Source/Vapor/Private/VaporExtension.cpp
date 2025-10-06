@@ -13,7 +13,7 @@
 #include <RenderTargetPool.h>
 
 IMPLEMENT_GLOBAL_SHADER(FCloudShader, "/Plugins/Vapor/CloudMarchCS.usf", "MainCS", SF_Compute);
-IMPLEMENT_GLOBAL_SHADER(FNoiseShader, "/Plugins/Vapor/NoiseGenCS.usf", "MainCS", SF_Compute);
+IMPLEMENT_GLOBAL_SHADER(FBakeShader, "/Plugins/Vapor/CloudBakeCS.usf", "MainCS", SF_Compute);
 
 IMPLEMENT_UNIFORM_BUFFER_STRUCT(FCloudscapeRenderData, "Cloud");
 
@@ -113,10 +113,10 @@ void FVaporExtension::PrePostProcessPass_RenderThread(FRDGBuilder& GraphBuilder,
 	FRDGTexture* SceneDepth = Inputs.SceneTextures->GetContents()->SceneDepthTexture;
 	const FIntPoint ViewSize = SceneColor->Desc.Extent;
 
-	if (!PersistentCacheData.IsValid() || !PersistentCacheFlags.IsValid()) {
+	if (!PersistentCacheData.IsValid()) { // || !PersistentCacheFlags.IsValid()) {
 		// 8 bits per cache slot.
 		const FPooledRenderTargetDesc CacheDataDesc = FPooledRenderTargetDesc::CreateVolumeDesc(
-			512, 512, 64, PF_R8, FClearValueBinding::None,
+			512 / 2, 512 / 2, 64 / 2, PF_R8, FClearValueBinding::None,
 			TexCreate_None, TexCreate_ShaderResource | TexCreate_UAV, false
 		);
 		GRenderTargetPool.FindFreeElement(
@@ -126,16 +126,47 @@ void FVaporExtension::PrePostProcessPass_RenderThread(FRDGBuilder& GraphBuilder,
 			TEXT("Density Cache Data Texture")
 		);
 		// 1 bit per cache slot.
-		const FPooledRenderTargetDesc CacheFlagsDesc = FPooledRenderTargetDesc::CreateVolumeDesc(
-			512 / 4, 512 / 4, 64 / 2, PF_R32_UINT, FClearValueBinding::None,
-			TexCreate_None, TexCreate_ShaderResource | TexCreate_UAV, false
-		);
-		GRenderTargetPool.FindFreeElement(
-			FRHICommandListExecutor::GetImmediateCommandList(),
-			CacheFlagsDesc,
-			PersistentCacheFlags,
-			TEXT("Density Cache Flags Texture")
-		);
+		//const FPooledRenderTargetDesc CacheFlagsDesc = FPooledRenderTargetDesc::CreateVolumeDesc(
+		//	512 / 4, 512 / 4, 64 / 2, PF_R32_UINT, FClearValueBinding::None,
+		//	TexCreate_None, TexCreate_ShaderResource | TexCreate_UAV, false
+		//);
+		//GRenderTargetPool.FindFreeElement(
+		//	FRHICommandListExecutor::GetImmediateCommandList(),
+		//	CacheFlagsDesc,
+		//	PersistentCacheFlags,
+		//	TEXT("Density Cache Flags Texture")
+		//);
+	}
+
+	TUniformBufferRef<FCloudscapeRenderData> CloudRenderData;
+	{ /* Create cloud render data uniform buffer */
+		FScopeLock Lock(&RenderDataLock);
+		RenderData.DensityTexture = GraphBuilder.RegisterExternalTexture(CreateRenderTarget(DensityTexture->GetTextureRHI(), TEXT("Density Texture")));
+		RenderData.SDFTexture = GraphBuilder.RegisterExternalTexture(CreateRenderTarget(SDFTexture->GetTextureRHI(), TEXT("SDF Texture")));
+		CloudRenderData = TUniformBufferRef<FCloudscapeRenderData>::CreateUniformBufferImmediate(RenderData, EUniformBufferUsage::UniformBuffer_SingleFrame);
+	}
+
+	FRDGTextureRef FRDGCacheData = GraphBuilder.RegisterExternalTexture(PersistentCacheData, ERDGTextureFlags::MultiFrame);
+	FRDGTextureRef FRDGNoise = GraphBuilder.RegisterExternalTexture(CreateRenderTarget(NoiseTexture->GetResource()->GetTextureRHI(), TEXT("Noise Texture")));
+
+	{ /* Cloud bake pass */
+		/* Allocate and fill-in the shader pass parameters */
+		FBakeShader::FParameters* PassParameters = GraphBuilder.AllocParameters<FBakeShader::FParameters>();
+		PassParameters->Cloud = CloudRenderData;
+		PassParameters->View = InView.ViewUniformBuffer;
+		PassParameters->Noise = FRDGNoise;
+		PassParameters->DensityCacheData = GraphBuilder.CreateUAV(FRDGCacheData);
+
+		/* Load the baking shader from the global shader map */
+		TShaderMapRef<FBakeShader> ComputeShader(GlobalShaderMap);
+
+		/* Calculate the group count based on the 'grid size / 2 / group size / 2' */
+		/* The cache grid is half the size of the density grid, and we go 1/8 the work each frame */
+		const FIntVector GroupCount = FIntVector::DivideAndRoundUp(FIntVector(512, 512, 64), 16);
+
+		FComputeShaderUtils::AddPass(GraphBuilder,
+			RDG_EVENT_NAME("Vapor Cloud Baking"),
+			ComputeShader, PassParameters, GroupCount);
 	}
 
 	/* Target texture creation info */
@@ -144,7 +175,7 @@ void FVaporExtension::PrePostProcessPass_RenderThread(FRDGBuilder& GraphBuilder,
 	OutputDesc.Reset();
 	OutputDesc.Flags |= TexCreate_UAV;
 	OutputDesc.Flags &= ~(TexCreate_RenderTargetable | TexCreate_FastVRAM);
-	const FLinearColor ClearColor(0., 0., 0., 0.);
+	const FLinearColor ClearColor(0.0f, 0.0f, 0.0f, 0.0f);
 	OutputDesc.ClearValue = FClearValueBinding(ClearColor);
 
 	/* Create a target texture we can write into */
@@ -152,24 +183,16 @@ void FVaporExtension::PrePostProcessPass_RenderThread(FRDGBuilder& GraphBuilder,
 
 	/* Allocate and fill-in the shader pass parameters */
 	FCloudShader::FParameters* PassParameters = GraphBuilder.AllocParameters<FCloudShader::FParameters>();
-	{
-		FScopeLock Lock(&RenderDataLock);
-		RenderData.DensityTexture = GraphBuilder.RegisterExternalTexture(CreateRenderTarget(DensityTexture->GetTextureRHI(), TEXT("Density Texture")));
-		RenderData.SDFTexture = GraphBuilder.RegisterExternalTexture(CreateRenderTarget(SDFTexture->GetTextureRHI(), TEXT("SDF Texture")));
-		PassParameters->Cloud = TUniformBufferRef<FCloudscapeRenderData>::CreateUniformBufferImmediate(RenderData, EUniformBufferUsage::UniformBuffer_SingleFrame);
-	}
+	PassParameters->Cloud = CloudRenderData;
 	PassParameters->View = InView.ViewUniformBuffer;
-	PassParameters->Noise = GraphBuilder.RegisterExternalTexture(CreateRenderTarget(NoiseTexture->GetResource()->GetTextureRHI(), TEXT("Noise Texture")));
+	PassParameters->Noise = FRDGNoise;
 	PassParameters->SceneColor = SceneColor;
 	PassParameters->SceneDepth = SceneDepth;
-	FRDGTextureRef FRDGCacheData = GraphBuilder.RegisterExternalTexture(PersistentCacheData, ERDGTextureFlags::MultiFrame);
 	PassParameters->DensityCacheDataSRV = GraphBuilder.CreateSRV(FRDGCacheData);
-	PassParameters->DensityCacheData = GraphBuilder.CreateUAV(FRDGCacheData);
-	PassParameters->DensityCacheFlags = GraphBuilder.CreateUAV(GraphBuilder.RegisterExternalTexture(PersistentCacheFlags, ERDGTextureFlags::MultiFrame));
 	PassParameters->Output = GraphBuilder.CreateUAV(FRDGTextureUAVDesc(OutputTexture));
 
 	/* Calculate the group count based on the viewport size */
-	const FIntVector DispatchCount = FComputeShaderUtils::GetGroupCount(ViewSize, FComputeShaderUtils::kGolden2DGroupSize);
+	const FIntVector GroupCount = FIntVector(FMath::DivideAndRoundUp(ViewSize.X, 16), FMath::DivideAndRoundUp(ViewSize.Y, 16), 1); // FComputeShaderUtils::GetGroupCount(ViewSize, FComputeShaderUtils::kGolden2DGroupSize);
 
 	/* Set the permutation vector for the shader */
 	FCloudShader::FPermutationDomain PermutationVector;
@@ -180,7 +203,7 @@ void FVaporExtension::PrePostProcessPass_RenderThread(FRDGBuilder& GraphBuilder,
 
 	FComputeShaderUtils::AddPass(GraphBuilder,
 		RDG_EVENT_NAME("Vapor Cloud Rendering %dx%d", ViewSize.X, ViewSize.Y),
-		ComputeShader, PassParameters, DispatchCount);
+		ComputeShader, PassParameters, GroupCount);
 
 	/* Finally copy our output texture back onto the scene color texture */
 	AddCopyTexturePass(GraphBuilder, OutputTexture, SceneColor);
