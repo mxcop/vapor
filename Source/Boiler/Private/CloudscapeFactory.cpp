@@ -239,6 +239,17 @@ UVaporCloud* UCloudscapeFactory::CreateVolumeTextureFromVDB(const FString& Filen
 		WorldAABB.expand(openvdb::BBoxd(Grid->indexToWorld(AABB.min()), Grid->indexToWorld(AABB.max())));
 	}
 
+	/* Change the world X and Z extent to fit our texture dimensions */
+	const double WorldHeight = WorldAABB.extents().y();
+	const double WorldX = ((double)VTEX_X / VTEX_Z) * WorldHeight;
+	const double WorldZ = ((double)VTEX_Y / VTEX_Z) * WorldHeight;
+	const double WorldXDelta = WorldX - WorldAABB.extents().x();
+	const double WorldZDelta = WorldZ - WorldAABB.extents().z();
+	WorldAABB.min().x() -= WorldXDelta * 0.5;
+	WorldAABB.min().z() -= WorldZDelta * 0.5;
+	WorldAABB.max().x() += WorldXDelta * 0.5;
+	WorldAABB.max().z() += WorldZDelta * 0.5;
+
 	/* Make sure our grid is a float grid */
 	if (!ProfileGrid) {
 		UE_LOG(LogTemp, Error, TEXT("Grid in VDB file is not a float grid"));
