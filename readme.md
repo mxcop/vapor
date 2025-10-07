@@ -1,4 +1,4 @@
-<img src="https://github.com/mxcop/vapor/blob/main/.github/pictures/alligator-cloud-spheres.png" />
+<img src="https://github.com/mxcop/vapor/blob/main/.github/pictures/vapor-banner.png" />
 
 # Vapor
 
