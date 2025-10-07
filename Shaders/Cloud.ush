@@ -5,6 +5,7 @@
 #include "Common.ush"
 
 static const float UNITS_PER_VOXEL = 800.0; // 8 m
+
 static const float3 VOLUME_RESOLUTION = float3(512, 512, 64);
 static const float3 VOLUME_SIZE = UNITS_PER_VOXEL * VOLUME_RESOLUTION;
 static const float3 HALF_VOLUME_SIZE = VOLUME_SIZE * 0.5;
@@ -67,6 +68,11 @@ struct CloudInstance {
     Texture3D<float> SDFTexture;
 };
 
+/// Calculate the threshold path density at which the absorption reaches a given threshold.
+float CalcPathDensityThreshold(const float AbsorptionThreshold, const float3 Absorption) {
+    return -log(AbsorptionThreshold) / min(min(Absorption.r, Absorption.g), Absorption.b);
+}
+
 float ValueErosion(const float Value, const float Erosion) {
 	const float InvErosion = (1.0 - Erosion);
     return saturate((Value - Erosion) / InvErosion);
@@ -116,5 +122,6 @@ RoughSample SampleCloudRough(ConstantBuffer<CloudInstance> Cloud, const float3 P
     
     // We're inside the volume, so we fetch the density and return it instead.
     Sample.Density = Cloud.DensityTexture.Sample(GlobalBilinearClampedSampler, UVW);
+    Sample.Density *= pow(saturate(Cloud.Density), 4.0);
     return Sample;
 }

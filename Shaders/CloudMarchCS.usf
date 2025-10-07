@@ -12,17 +12,15 @@ ConstantBuffer<CloudInstance> Cloud;
 Texture2D<float3> SceneColor;
 Texture2D<float> SceneDepth;
 
+// Density Cache Texture
+Texture3D<float> DensityCacheDataSRV;
+
 // Output Texture
 RWTexture2D<float4> Output;
 
 #if DEBUG
 static int STEP_COUNT = 0;
 #endif
-
-/// Calculate the threshold path density at which the absorption reaches a given threshold.
-float CalcPathDensityThreshold(const float AbsorptionThreshold) {
-    return -log(AbsorptionThreshold) / min(min(Cloud.Absorption.r, Cloud.Absorption.g), Cloud.Absorption.b);
-}
 
 /// Calculate a distance-based step size for ray-marching.
 float CalcStepSize(const float Distance) {
@@ -32,12 +30,6 @@ float CalcStepSize(const float Distance) {
 
 CloudSample SampleVolume(const float3 Point) {
     return SampleCloud(Cloud, Point);
-    //if (Sample.IsOutside()) return Sample;
-    //const float WindOffset = float3(0.25, 0.4, 0.8) * View.GameTime * 0.1;
-    //const float4 Erosion = Noise.Sample(GlobalBilinearWrappedSampler, (Point * 0.0001) - WindOffset);
-    //const float BillowyFreqGradient = pow(Sample.Density() / Cloud.Density, 0.25);
-    //const float BillowyNoise = lerp(Erosion.b * 0.3, Erosion.a * 0.3, BillowyFreqGradient);
-    //return CloudSample::Inside(ValueErosion(Sample.Density() / Cloud.Density, BillowyNoise) * Cloud.Density);
 }
 
 /// Anisotropic scattering function for clouds.
@@ -51,44 +43,25 @@ float HenyeyGreenstein(float VdotL, float G) {
 }
 
 /// Trace the scene, find out how much light is being absorped.
-float3 TraceAbsorption(const float3 Origin, const float3 Dir, const float SunDot, const float PathDensityThreshold) {
-    // Intersect the bounds of the volume, return early if we miss.
-    const float2 BoundsIntersection = RayAABB(Origin, Dir, Cloud.Position - HALF_VOLUME_SIZE, Cloud.Position + HALF_VOLUME_SIZE);
-    
-    // Traversal variables.
-    float Distance = max(0.0, BoundsIntersection.x);
-    float PathDensity = 0.0;
-    
-    for (uint s = 0; s < MAX_INDIRECT_STEPS; ++s) {
-        if (Distance >= BoundsIntersection.y) break;
-        
-        // Sample the volume.
-        const float3 SamplePos = Origin + Dir * Distance;
-        const CloudSample Sample = SampleVolume(SamplePos);
-        
-        // No work to be done outside the volume, just keep stepping.
-        if (Sample.IsOutside()) {
-            Distance += max(Cloud.PrimaryMinSDFStep, Sample.SDist()); // Move along the ray to the next location.
-            continue;
-        }
-        Distance += Cloud.SecondaryStep;
-        
-        // We're inside the volume, accumulate density.
-        PathDensity += Sample.Density() * Cloud.SecondaryStep;
-        if (PathDensity > PathDensityThreshold) break;
-    }
+float3 TraceAbsorption(const float3 Origin, const float3 Dir, const float SunDot) {
+    // Sample the cache.
+    const float3 UVW = (Origin - Cloud.Position) / HALF_VOLUME_SIZE * 0.5 + 0.5;
+    const float CacheData = DensityCacheDataSRV.Sample(GlobalBilinearClampedSampler, UVW);
+    const float PathDensity = Remap(CacheData, 0.0, 1.0, 0.0, 32.0);
+    if (PathDensity == 32.0) return float3(0.0, 0.0, 0.0);
     
     // Beer's Law <https://en.wikipedia.org/wiki/Beer%E2%80%93Lambert_law>
-    float3 Absorption = exp(-Cloud.Absorption * PathDensity);
+    const float InvAbsorption = -Cloud.Absorption * PathDensity;
     
     // Multi-scatter approximation.
     if (Cloud.MultiScattering) {
         const RoughSample Sample = SampleCloudRough(Cloud, Origin);
-        const float3 MsVolume = exp(-Cloud.Absorption * PathDensity * Remap(SunDot, 0.0, 0.9, Remap(Sample.SDist, 0.0, -16.0 * UNITS_PER_VOXEL, 0.05, 0.25), 0.25));
-        Absorption += MsVolume;
+        const float InnerGlow = Remap(Sample.SDist, -12800.0, 0.0, 0.05, 0.25);
+        const float AnisotropicScattering = Remap(SunDot, 0.0, 0.9, 0.25, InnerGlow);
+        return exp(InvAbsorption) + exp(InvAbsorption * AnisotropicScattering);
     }
-    
-    return Absorption;
+   
+    return exp(InvAbsorption);
 }
 
 float3 TraceVolume(const float3 ViewColor, const float3 Origin, const float3 Dir) {
@@ -101,9 +74,6 @@ float3 TraceVolume(const float3 ViewColor, const float3 Origin, const float3 Dir
     float3 Luminance = 0.0;
     float PathDensity = 0.0;
     float Distance = max(0.0, BoundsIntersection.x);
-    
-    // Calculate at what path density we will reach the extinction threshold.
-    const float PathDensityThreshold = CalcPathDensityThreshold(Cloud.SecondaryExtinctThreshold);
     
     // Sun out-scattering will be identical everywhere along the ray, so we pre-calculate it.
     const float SunDot = dot(Dir, Cloud.SunDir);
@@ -144,7 +114,7 @@ float3 TraceVolume(const float3 ViewColor, const float3 Origin, const float3 Dir
         
         // Integrate direct out-scattering from the sun. 
         if (Cloud.DirectScattering) {
-            Luminance += TraceAbsorption(SamplePos, Cloud.SunDir, SunDot, PathDensityThreshold) * Scattering * StepDensity * (1.0 - Absorption);
+            Luminance += TraceAbsorption(SamplePos, Cloud.SunDir, SunDot) * Scattering * StepDensity * (1.0 - Absorption);
         }
         
         // Integrate ambient out-scattering.

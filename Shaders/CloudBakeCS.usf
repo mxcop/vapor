@@ -1,0 +1,60 @@
+#include "Common.ush"
+#include "Cloud.ush"
+
+static const uint MAX_STEPS = 256;
+
+// Cloud Parameters
+ConstantBuffer<CloudInstance> Cloud;
+RWTexture3D<float> DensityCacheData;
+
+/// Trace the scene, find out how much density lies alogn a given ray.
+float TracePathDensity(const float3 Origin, const float3 Dir) {
+    // Intersect the bounds of the volume.
+    const float2 BoundsIntersection = RayAABB(Origin, Dir, Cloud.Position - HALF_VOLUME_SIZE, Cloud.Position + HALF_VOLUME_SIZE);
+    
+    // Traversal variables.
+    const float PathDensityThreshold = CalcPathDensityThreshold(Cloud.SecondaryExtinctThreshold, Cloud.Absorption);
+    float Distance = 0.0;
+    float PathDensity = 0.0;
+    
+    for (uint s = 0; s < MAX_STEPS; ++s) {
+        if (Distance >= BoundsIntersection.y) break;
+        
+        // Sample the rough volume.
+        const float3 SamplePos = Origin + Dir * Distance;
+        const CloudSample Sample = SampleCloud(Cloud, SamplePos);
+        
+        // No work to be done outside the volume, just keep stepping.
+        if (Sample.IsOutside()) {
+            Distance += max(Cloud.PrimaryMinSDFStep, Sample.SDist());
+            continue;
+        }
+        Distance += Cloud.SecondaryStep;
+        
+        // We're inside the volume, accumulate density.
+        PathDensity += Sample.Density() * Cloud.SecondaryStep;
+        if (PathDensity > PathDensityThreshold) break;
+    }
+    
+    return PathDensity;
+}
+
+// Compute Shader code
+[numthreads(THREADS_X, THREADS_Y, THREADS_Z)]
+void MainCS(uint3 DispatchThreadId : SV_DispatchThreadID) {
+    // Calculate the cache slot origin for this thread.
+    const uint FrameIndex = View.FrameCounter;
+    const uint3 OutputId = (DispatchThreadId << 1u) + uint3(FrameIndex & 1u, (FrameIndex >> 1u) & 1u, (FrameIndex >> 2u) & 1u);
+    const float3 Voxel = float3(OutputId) * 2.0 + 1.0;
+    const float3 Origin = (Cloud.Position - HALF_VOLUME_SIZE) + Voxel * UNITS_PER_VOXEL;
+    
+    // Check if there's cloud at the origin, if not, exit early.
+    const RoughSample OriginSample = SampleCloudRough(Cloud, Origin);
+    if (OriginSample.SDist > 0.0) return;
+    
+    // Trace the path density toward the sun for this cache slot.
+    const float PathDensity = TracePathDensity(Origin, Cloud.SunDir);
+    
+    // Store the path density data into the cache slot.
+    DensityCacheData[OutputId] = Remap(PathDensity, 0.0, 32.0, 0.0, 1.0);
+}

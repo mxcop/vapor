@@ -38,6 +38,10 @@ class FVaporExtension : public FSceneViewExtensionBase {
 	UVolumeTexture* NoiseTexture = nullptr;
 	FCriticalSection RenderDataLock;
 
+	// Cache UAV Textures
+	TRefCountPtr<IPooledRenderTarget> PersistentCacheData;
+	TRefCountPtr<IPooledRenderTarget> PersistentCacheFlags;
+
 	bool DebugMode = false;
 
 public:
@@ -67,6 +71,7 @@ public:
 		SHADER_PARAMETER_RDG_TEXTURE(Texture3D, Noise)
 		SHADER_PARAMETER_RDG_TEXTURE(Texture2D, SceneColor)
 		SHADER_PARAMETER_RDG_TEXTURE(Texture2D, SceneDepth)
+		SHADER_PARAMETER_RDG_TEXTURE_SRV(Texture3D, DensityCacheDataSRV)
 		SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D<float4>, Output)
 	END_SHADER_PARAMETER_STRUCT()
 
@@ -86,15 +91,18 @@ public:
 	}
 };
 
-// Noise generation shader.
-class FNoiseShader : public FGlobalShader {
+// Cloud bake shader.
+class FBakeShader : public FGlobalShader {
 public:
-	DECLARE_GLOBAL_SHADER(FNoiseShader)
+	DECLARE_GLOBAL_SHADER(FBakeShader)
 
-	SHADER_USE_PARAMETER_STRUCT(FNoiseShader, FGlobalShader)
+	SHADER_USE_PARAMETER_STRUCT(FBakeShader, FGlobalShader)
 
 	BEGIN_SHADER_PARAMETER_STRUCT(FParameters, )
-		SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture3D<float>, Output)
+		SHADER_PARAMETER_STRUCT_REF(FCloudscapeRenderData, Cloud)
+		SHADER_PARAMETER_STRUCT_REF(FViewUniformShaderParameters, View)
+		SHADER_PARAMETER_RDG_TEXTURE(Texture3D, Noise)
+		SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture3D, DensityCacheData)
 	END_SHADER_PARAMETER_STRUCT()
 
 	// Basic shader initialization
@@ -109,28 +117,3 @@ public:
 		OutEnvironment.SetDefine(TEXT("THREADS_Z"), 4);
 	}
 };
-
-// SH Bake shader.
-//class FBakeShader : public FGlobalShader {
-//public:
-//	DECLARE_GLOBAL_SHADER(FBakeShader)
-//
-//	SHADER_USE_PARAMETER_STRUCT(FBakeShader, FGlobalShader)
-//
-//	BEGIN_SHADER_PARAMETER_STRUCT(FParameters, )
-//		SHADER_PARAMETER_STRUCT_REF(FCloudscapeRenderData, Cloud)
-//		SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture3D<float4>, OutputSH)
-//	END_SHADER_PARAMETER_STRUCT()
-//
-//	// Basic shader initialization
-//	static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters) {
-//		return IsFeatureLevelSupported(Parameters.Platform, ERHIFeatureLevel::SM5);
-//	}
-//
-//	// Define environment variables used by compute shader
-//	static void ModifyCompilationEnvironment(const FGlobalShaderPermutationParameters& Parameters, FShaderCompilerEnvironment& OutEnvironment) {
-//		OutEnvironment.SetDefine(TEXT("THREADS_X"), 4);
-//		OutEnvironment.SetDefine(TEXT("THREADS_Y"), 4);
-//		OutEnvironment.SetDefine(TEXT("THREADS_Z"), 4);
-//	}
-//};
