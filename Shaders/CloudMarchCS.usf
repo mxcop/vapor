@@ -51,7 +51,7 @@ float3 TraceAbsorption(const float3 Origin, const float3 Dir, const float SunDot
     if (PathDensity == 32.0) return float3(0.0, 0.0, 0.0);
     
     // Beer's Law <https://en.wikipedia.org/wiki/Beer%E2%80%93Lambert_law>
-    const float InvAbsorption = -Cloud.Absorption * PathDensity;
+    const float3 InvAbsorption = -Cloud.Absorption * PathDensity;
     
     // Multi-scatter approximation.
     if (Cloud.MultiScattering) {
