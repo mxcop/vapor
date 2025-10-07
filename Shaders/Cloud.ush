@@ -69,8 +69,8 @@ struct CloudInstance {
 };
 
 /// Calculate the threshold path density at which the absorption reaches a given threshold.
-float CalcPathDensityThreshold(const float AbsorptionThreshold) {
-    return -log(AbsorptionThreshold) / min(min(Cloud.Absorption.r, Cloud.Absorption.g), Cloud.Absorption.b);
+float CalcPathDensityThreshold(const float AbsorptionThreshold, const float3 Absorption) {
+    return -log(AbsorptionThreshold) / min(min(Absorption.r, Absorption.g), Absorption.b);
 }
 
 float ValueErosion(const float Value, const float Erosion) {

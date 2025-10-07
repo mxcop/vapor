@@ -13,7 +13,7 @@ float TracePathDensity(const float3 Origin, const float3 Dir) {
     const float2 BoundsIntersection = RayAABB(Origin, Dir, Cloud.Position - HALF_VOLUME_SIZE, Cloud.Position + HALF_VOLUME_SIZE);
     
     // Traversal variables.
-    const float PathDensityThreshold = CalcPathDensityThreshold(Cloud.SecondaryExtinctThreshold);
+    const float PathDensityThreshold = CalcPathDensityThreshold(Cloud.SecondaryExtinctThreshold, Cloud.Absorption);
     float Distance = 0.0;
     float PathDensity = 0.0;
     
@@ -56,5 +56,5 @@ void MainCS(uint3 DispatchThreadId : SV_DispatchThreadID) {
     const float PathDensity = TracePathDensity(Origin, Cloud.SunDir);
     
     // Store the path density data into the cache slot.
-    DensityCacheData[OutputId] = Remap(PathDensity, 0.0, 16.0, 0.0, 1.0);
+    DensityCacheData[OutputId] = Remap(PathDensity, 0.0, 32.0, 0.0, 1.0);
 }

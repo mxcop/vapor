@@ -12,16 +12,14 @@ ConstantBuffer<CloudInstance> Cloud;
 Texture2D<float3> SceneColor;
 Texture2D<float> SceneDepth;
 
+// Density Cache Texture
 Texture3D<float> DensityCacheDataSRV;
-RWTexture3D<float> DensityCacheData;
-RWTexture3D<uint> DensityCacheFlags;
 
 // Output Texture
 RWTexture2D<float4> Output;
 
 #if DEBUG
 static int STEP_COUNT = 0;
-static int STEP_COUNT2 = 0;
 #endif
 
 /// Calculate a distance-based step size for ray-marching.
@@ -45,24 +43,25 @@ float HenyeyGreenstein(float VdotL, float G) {
 }
 
 /// Trace the scene, find out how much light is being absorped.
-float3 TraceAbsorption(const float3 Origin, const float3 Dir, const float SunDot, const float PathDensityThreshold) {
+float3 TraceAbsorption(const float3 Origin, const float3 Dir, const float SunDot) {
     // Sample the cache.
     const float3 UVW = (Origin - Cloud.Position) / HALF_VOLUME_SIZE * 0.5 + 0.5;
-    
     const float CacheData = DensityCacheDataSRV.Sample(GlobalBilinearClampedSampler, UVW);
-    const float PathDensity = Remap(CacheData, 0.0, 1.0, 0.0, 16.0);
+    const float PathDensity = Remap(CacheData, 0.0, 1.0, 0.0, 32.0);
+    if (PathDensity == 32.0) return float3(0.0, 0.0, 0.0);
     
     // Beer's Law <https://en.wikipedia.org/wiki/Beer%E2%80%93Lambert_law>
-    float3 Absorption = exp(-Cloud.Absorption * PathDensity);
+    const float InvAbsorption = -Cloud.Absorption * PathDensity;
     
     // Multi-scatter approximation.
     if (Cloud.MultiScattering) {
         const RoughSample Sample = SampleCloudRough(Cloud, Origin);
-        const float3 MsVolume = exp(-Cloud.Absorption * PathDensity * Remap(SunDot, 0.0, 0.9, Remap(Sample.SDist, 0.0, -16.0 * UNITS_PER_VOXEL, 0.05, 0.25), 0.25));
-        Absorption += MsVolume;
+        const float InnerGlow = Remap(Sample.SDist, -12800.0, 0.0, 0.05, 0.25);
+        const float AnisotropicScattering = Remap(SunDot, 0.0, 0.9, 0.25, InnerGlow);
+        return exp(InvAbsorption) + exp(InvAbsorption * AnisotropicScattering);
     }
-    
-    return Absorption;
+   
+    return exp(InvAbsorption);
 }
 
 float3 TraceVolume(const float3 ViewColor, const float3 Origin, const float3 Dir) {
@@ -76,9 +75,6 @@ float3 TraceVolume(const float3 ViewColor, const float3 Origin, const float3 Dir
     float PathDensity = 0.0;
     float Distance = max(0.0, BoundsIntersection.x);
     
-    // Calculate at what path density we will reach the extinction threshold.
-    const float PathDensityThreshold = CalcPathDensityThreshold(Cloud.SecondaryExtinctThreshold);
-    
     // Sun out-scattering will be identical everywhere along the ray, so we pre-calculate it.
     const float SunDot = dot(Dir, Cloud.SunDir);
     const float3 Scattering = Cloud.SunLuminance * HenyeyGreenstein(SunDot, 0.2);
@@ -86,6 +82,10 @@ float3 TraceVolume(const float3 ViewColor, const float3 Origin, const float3 Dir
     // Integrate luminance along the ray.
     for (uint s = 0; s < MAX_DIRECT_STEPS; ++s) {
         if (Distance >= BoundsIntersection.y) break;
+        
+#if DEBUG
+        STEP_COUNT++;
+#endif
         
         // Sample the volume at the current location.
         const float3 SamplePos = Origin + Dir * Distance;
@@ -114,7 +114,7 @@ float3 TraceVolume(const float3 ViewColor, const float3 Origin, const float3 Dir
         
         // Integrate direct out-scattering from the sun. 
         if (Cloud.DirectScattering) {
-            Luminance += TraceAbsorption(SamplePos, Cloud.SunDir, SunDot, PathDensityThreshold) * Scattering * StepDensity * (1.0 - Absorption);
+            Luminance += TraceAbsorption(SamplePos, Cloud.SunDir, SunDot) * Scattering * StepDensity * (1.0 - Absorption);
         }
         
         // Integrate ambient out-scattering.
@@ -152,7 +152,7 @@ void MainCS(uint2 DispatchThreadId : SV_DispatchThreadID) {
     const float3 FinalColor = TraceVolume(SceneColor[Pixel], RayOrigin, RayDirection);
     
 #if DEBUG
-    Output[Pixel] = float4((float)STEP_COUNT / (float)MAX_DIRECT_STEPS, (float)STEP_COUNT2 / (float)MAX_DIRECT_STEPS, 0.0, 1.0);
+    Output[Pixel] = float4((float)STEP_COUNT / (float)MAX_DIRECT_STEPS, 0.0, 0.0, 1.0);
 #else
     Output[Pixel] = float4(FinalColor, 1.0);
 #endif
