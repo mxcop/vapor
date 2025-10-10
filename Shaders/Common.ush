@@ -3,6 +3,8 @@
 #include "/Engine/Public/Platform.ush"
 #include "/Engine/Private/Common.ush"
 
+#define PI 3.14159265359
+
 /// Remap an input value in an input range to an output range.
 float Remap(const float Value, const float InMin, const float InMax, const float OutMin, const float OutMax) {
     const float Range = InMax - InMin;

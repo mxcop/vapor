@@ -38,9 +38,9 @@ enum ERenderTarget {
 FVaporExtension::FVaporExtension(const FAutoRegister& AutoRegister) : FSceneViewExtensionBase(AutoRegister) {
 	UE_LOG(LogTemp, Log, TEXT("Vapor: Custom SceneViewExtension registered"));
 
-	// Create 8-bit unorm cache grid texture.
+	// Create 8-bit 2 channel unorm cache grid texture.
 	const FPooledRenderTargetDesc CacheDataDesc = FPooledRenderTargetDesc::CreateVolumeDesc(
-		512 / 2, 512 / 2, 64 / 2, PF_R8, FClearValueBinding::None,
+		512 / 2, 512 / 2, 64 / 2, PF_R8G8, FClearValueBinding::None,
 		TexCreate_None, TexCreate_ShaderResource | TexCreate_UAV, false
 	);
 	GRenderTargetPool.FindFreeElement(
@@ -64,11 +64,15 @@ void FVaporExtension::BeginRenderViewFamily(FSceneViewFamily& ViewFamily) {
 
 	/* Fill in the render data struct */
 	FCloudscapeRenderData Data {};
+	VaporInstance->GetComponent()->IntoRenderData(Data);
 	Data.Position = (FVector3f)VaporInstance->GetActorLocation();
 	Data.SunDir = -(FVector3f)SunInstance->GetComponent()->GetDirection();
 	Data.SunLuminance = (FVector3f)SunInstance->GetComponent()->GetColoredLightBrightness();
-	if (SkyInstance) Data.SunLuminance *= (FVector3f)SkyInstance->GetComponent()->GetAtmosphereTransmitanceOnGroundAtPlanetTop(SunInstance->GetComponent());
-	VaporInstance->GetComponent()->IntoRenderData(Data);
+	if (SkyInstance) {
+		const FVector3f AtmosphereTransmitance = (FVector3f)SkyInstance->GetComponent()->GetAtmosphereTransmitanceOnGroundAtPlanetTop(SunInstance->GetComponent());
+		Data.SunLuminance *= AtmosphereTransmitance;
+		Data.AmbientLuminance *= AtmosphereTransmitance;
+	}
 
 	{ /* Lock and update the render data */
 		FScopeLock Lock(&RenderDataLock);

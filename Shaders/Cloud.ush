@@ -42,11 +42,12 @@ struct CloudInstance {
     float3 Position;
     float3 Absorption;
     float Density;
+    float ProfileWidth;
     
     // Light Data
     float3 SunDir;
     float3 SunLuminance;
-    float3 AmbientFlux;
+    float3 AmbientLuminance;
         
     // Primary Ray Options
     float PrimaryNearStep;
@@ -62,6 +63,7 @@ struct CloudInstance {
     float SecondaryExtinctThreshold;
     
     float NoiseFreq;
+    float3 WindSpeed;
     
     // Textures
     Texture3D<float> DensityTexture;
@@ -93,22 +95,21 @@ CloudSample SampleCloud(ConstantBuffer<CloudInstance> Cloud, const float3 Point)
     // We're inside the volume, so we fetch the density and return it instead.
     const float Density = Cloud.DensityTexture.Sample(GlobalBilinearClampedSampler, UVW);
     
-    const float WindOffset = float3(0.25, 0.4, 0.8) * View.GameTime * 0.1;
-    const float4 NoiseSample = Noise.Sample(GlobalBilinearWrappedSampler, (Point * Cloud.NoiseFreq) - WindOffset);
+    const float3 WindOffset = Cloud.WindSpeed * View.GameTime;
+    const float4 NoiseSample = Noise.Sample(GlobalBilinearWrappedSampler, (Point - WindOffset) * Cloud.NoiseFreq);
     
-    const float DimensionalProfile = min(1.0, -SDist / UNITS_PER_VOXEL * 0.2);
+    const float DimensionalProfile = min(1.0, -SDist / Cloud.ProfileWidth);
     const float BillowyFreqGradient = pow(DimensionalProfile, 0.25);
     const float BillowyNoise = lerp(NoiseSample.b * 0.3, NoiseSample.r * 0.3, BillowyFreqGradient);
 
-    float ErodedDensity = ValueErosion(Density, BillowyNoise);
+    float ErodedDensity = ValueErosion(DimensionalProfile, BillowyNoise);
     // Modify User density scale
-    float powered_density_scale = pow(saturate(Cloud.Density), 4.0);
+    const float PowDensity = pow(saturate(Density * Cloud.Density), 4.0);
     // Apply User Density Scale Data to Result
-    ErodedDensity *= powered_density_scale;
+    ErodedDensity *= PowDensity;
     // Sharpen result and lower Density close to camera to both add details and reduce undersampling noise
-    ErodedDensity = pow(ErodedDensity, lerp(0.3, 0.6, max(0.00001, powered_density_scale)));
+    ErodedDensity = pow(ErodedDensity, lerp(0.3, 0.6, max(0.00001, PowDensity)));
     return CloudSample::Inside(ErodedDensity);
-    // return CloudSample::Inside(Density * Cloud.Density);
 }
 
 RoughSample SampleCloudRough(ConstantBuffer<CloudInstance> Cloud, const float3 Point) {
@@ -119,9 +120,16 @@ RoughSample SampleCloudRough(ConstantBuffer<CloudInstance> Cloud, const float3 P
     // The SDF is stored from -32 to 512 in a UNorm texture encoded in voxel-space.
     const float NormSDist = Cloud.SDFTexture.Sample(GlobalBilinearClampedSampler, UVW);
     Sample.SDist = (NormSDist * (32.0 + 512.0) - 32.0) * UNITS_PER_VOXEL;
+    const float DimensionalProfile = min(1.0, -Sample.SDist / Cloud.ProfileWidth);
     
     // We're inside the volume, so we fetch the density and return it instead.
-    Sample.Density = Cloud.DensityTexture.Sample(GlobalBilinearClampedSampler, UVW);
-    Sample.Density *= pow(saturate(Cloud.Density), 4.0);
+    const float DensityScale = Cloud.DensityTexture.Sample(GlobalBilinearClampedSampler, UVW);
+    Sample.Density = DimensionalProfile; // Cloud.DensityTexture.Sample(GlobalBilinearClampedSampler, UVW);
+    // Modify User density scale
+    const float PowDensity = pow(saturate(DensityScale * Cloud.Density), 4.0);
+    // Apply User Density Scale Data to Result
+    Sample.Density *= PowDensity;
+    // Sharpen result and lower Density close to camera to both add details and reduce undersampling noise
+    Sample.Density = pow(Sample.Density, lerp(0.3, 0.6, max(0.00001, PowDensity)));
     return Sample;
 }

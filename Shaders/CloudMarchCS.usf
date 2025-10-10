@@ -13,7 +13,7 @@ Texture2D<float3> SceneColor;
 Texture2D<float> SceneDepth;
 
 // Density Cache Texture
-Texture3D<float> DensityCacheDataSRV;
+Texture3D<float2> DensityCacheDataSRV;
 
 // Output Texture
 RWTexture2D<float4> Output;
@@ -46,8 +46,8 @@ float HenyeyGreenstein(float VdotL, float G) {
 float3 TraceAbsorption(const float3 Origin, const float3 Dir, const float SunDot) {
     // Sample the cache.
     const float3 UVW = (Origin - Cloud.Position) / HALF_VOLUME_SIZE * 0.5 + 0.5;
-    const float CacheData = DensityCacheDataSRV.Sample(GlobalBilinearClampedSampler, UVW);
-    const float PathDensity = Remap(CacheData, 0.0, 1.0, 0.0, 32.0);
+    const float2 CacheData = DensityCacheDataSRV.Sample(GlobalBilinearClampedSampler, UVW);
+    const float PathDensity = Remap(CacheData.x, 0.0, 1.0, 0.0, 32.0);
     if (PathDensity == 32.0) return float3(0.0, 0.0, 0.0);
     
     // Beer's Law <https://en.wikipedia.org/wiki/Beer%E2%80%93Lambert_law>
@@ -119,9 +119,14 @@ float3 TraceVolume(const float3 ViewColor, const float3 Origin, const float3 Dir
         
         // Integrate ambient out-scattering.
         if (Cloud.AmbientScattering) {
+            // Sample the cache.
+            const float3 UVW = (SamplePos - Cloud.Position) / HALF_VOLUME_SIZE * 0.5 + 0.5;
+            const float2 CacheData = DensityCacheDataSRV.Sample(GlobalBilinearClampedSampler, UVW);
+            const float AmbientCoverage = CacheData.y;
+            
             const RoughSample Sample = SampleCloudRough(Cloud, Origin);
-            const float DimensionalProfile = min(1.0, -Sample.SDist / UNITS_PER_VOXEL * 0.2);
-            Luminance += StepDensity * pow(1.0 - DimensionalProfile, 0.5) * Cloud.AmbientFlux;
+            const float DimensionalProfile = min(1.0, -Sample.SDist / Cloud.ProfileWidth);
+            Luminance += pow(1.0 - DimensionalProfile, 0.5) * Cloud.AmbientLuminance * StepDensity * (1.0 - Absorption) * exp(-AmbientCoverage * Cloud.Absorption);
         }
     }
     

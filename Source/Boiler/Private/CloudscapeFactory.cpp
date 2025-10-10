@@ -105,11 +105,15 @@ openvdb::FloatGrid::Ptr ResampleGrid(const openvdb::BBoxd& WorldAABB, const open
 
 				if (ScaleGrid != nullptr) {
 					const openvdb::tools::GridSampler<openvdb::FloatGrid, openvdb::tools::BoxSampler> ScaleSampler(*FilteredScale);
-					Value *= ScaleSampler.wsSample(openvdb::Vec3d(
+					const float DensityScale = ScaleSampler.wsSample(openvdb::Vec3d(
 						WorldAABB.min().x() + x * StepSizes.x(),
 						WorldAABB.min().y() + z * StepSizes.y(),
 						WorldAABB.min().z() + y * StepSizes.z()
 					));
+					
+					const float PowScale = FMath::Pow(FMath::Clamp(DensityScale, 0.0f, 1.0f), 4.0f);
+					Value *= PowScale;
+					Value = FMath::Pow(Value, FMath::Lerp(0.3f, 0.6f, FMath::Max(0.00001f, PowScale)));
 				}
 
 				/* Set the value inside our resampled grid */
