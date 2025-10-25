@@ -19,6 +19,11 @@ FVector3f UVaporComponent::GetAbsorption() const {
 	return FVector3f(2.0f - LogR, 2.0f - LogG, 2.0f - LogB);
 }
 
+/// Calculate the threshold path density at which the absorption reaches a given threshold.
+static float CalcPathDensityThreshold(const float AbsorptionThreshold, const FVector3f Absorption) {
+	return -FMath::Loge(AbsorptionThreshold) / FMath::Min3(Absorption.X, Absorption.Y, Absorption.Z);
+}
+
 void UVaporComponent::IntoRenderData(FCloudscapeRenderData& RenderData) const {
 	RenderData.Absorption = ColorSpecifier == ECloudColorSpecifier::Absorption ? FVector3f(Absorption) : GetAbsorption();
 	RenderData.AmbientLuminance = FVector3f(AmbientStrength, AmbientStrength, AmbientStrength);
@@ -31,7 +36,7 @@ void UVaporComponent::IntoRenderData(FCloudscapeRenderData& RenderData) const {
 	RenderData.MultiScattering = MultiScattering;
 	RenderData.AmbientScattering = AmbientScattering;
 	RenderData.SecondaryStep = SecondaryStep;
-	RenderData.SecondaryExtinctThreshold = SecondaryExtinctThreshold / 100.0f;
+	RenderData.SecondaryExtinctThreshold = CalcPathDensityThreshold(SecondaryExtinctThreshold / 100.0f, RenderData.Absorption);
 	RenderData.NoiseFreq = NoiseFrequency;
 	RenderData.WindSpeed = WindSpeed;
 }

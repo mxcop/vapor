@@ -60,12 +60,15 @@ void FVaporExtension::BeginRenderViewFamily(FSceneViewFamily& ViewFamily) {
 	TActorIterator<AVapor> VaporInstance(World);
 	TActorIterator<ADirectionalLight> SunInstance(World);
 	TActorIterator<ASkyAtmosphere> SkyInstance(World);
-	if (!VaporInstance || !SunInstance) return;
+	if (!VaporInstance || !SunInstance) {
+		DensityTexture = nullptr;
+		return;
+	}
 
 	/* Fill in the render data struct */
 	FCloudscapeRenderData Data {};
 	VaporInstance->GetComponent()->IntoRenderData(Data);
-	Data.Position = (FVector3f)VaporInstance->GetActorLocation();
+	Data.Position = ((FVector3f)VaporInstance->GetActorLocation()) * 0.01f; /* CM to M */
 	Data.SunDir = -(FVector3f)SunInstance->GetComponent()->GetDirection();
 	Data.SunLuminance = (FVector3f)SunInstance->GetComponent()->GetColoredLightBrightness();
 	if (SkyInstance) {
@@ -96,13 +99,10 @@ void FVaporExtension::BeginRenderViewFamily(FSceneViewFamily& ViewFamily) {
 
 void FVaporExtension::PrePostProcessPass_RenderThread(FRDGBuilder& GraphBuilder, const FSceneView& InView, const FPostProcessingInputs& Inputs) {
 	/* Check if our extension is toggled ON */
-	if (CVarShaderOn.GetValueOnRenderThread() == 0) return;
+	// if (CVarShaderOn.GetValueOnRenderThread() == 0) return;
 
 	/* Get the global shader map from our scene view */
 	FGlobalShaderMap* GlobalShaderMap = GetGlobalShaderMap(InView.Family->GetFeatureLevel());
-
-	/* Start the render graph event scope */
-	RDG_EVENT_SCOPE(GraphBuilder, "Vapor Render Pass");
 
 	/* Make sure the cloud textures are set */
 	if (DensityTexture == nullptr || SDFTexture == nullptr) return;
@@ -140,10 +140,12 @@ void FVaporExtension::PrePostProcessPass_RenderThread(FRDGBuilder& GraphBuilder,
 
 		/* Calculate the group count based on the 'grid size / 2 / group size / 2' */
 		/* The cache grid is half the size of the density grid, and we go 1/8 the work each frame */
-		const FIntVector GroupCount = FIntVector::DivideAndRoundUp(FIntVector(512, 512, 64), 16);
+		const FIntVector ThreadCount = FIntVector::DivideAndRoundUp(FIntVector(512, 512, 64), 4);
+		const FIntVector GroupCount = FIntVector::DivideAndRoundUp(ThreadCount, 4);
 
+		RDG_EVENT_SCOPE(GraphBuilder, "Vapor - Direct Scattering Integration Pass %dx%dx%d", ThreadCount.X, ThreadCount.Y, ThreadCount.Z);
 		FComputeShaderUtils::AddPass(GraphBuilder,
-			RDG_EVENT_NAME("Vapor Cloud Baking"),
+			RDG_EVENT_NAME("Vapor - Direct Scattering Integration"),
 			ComputeShader, PassParameters, GroupCount);
 	}
 
@@ -170,7 +172,7 @@ void FVaporExtension::PrePostProcessPass_RenderThread(FRDGBuilder& GraphBuilder,
 	PassParameters->Output = GraphBuilder.CreateUAV(FRDGTextureUAVDesc(OutputTexture));
 
 	/* Calculate the group count based on the viewport size */
-	const FIntVector GroupCount = FIntVector(FMath::DivideAndRoundUp(ViewSize.X, 16), FMath::DivideAndRoundUp(ViewSize.Y, 16), 1); // FComputeShaderUtils::GetGroupCount(ViewSize, FComputeShaderUtils::kGolden2DGroupSize);
+	const FIntVector GroupCount = FIntVector(FMath::DivideAndRoundUp(ViewSize.X, 16), FMath::DivideAndRoundUp(ViewSize.Y, 16), 1);
 
 	/* Set the permutation vector for the shader */
 	FCloudShader::FPermutationDomain PermutationVector;
@@ -179,8 +181,9 @@ void FVaporExtension::PrePostProcessPass_RenderThread(FRDGBuilder& GraphBuilder,
 	/* Load our custom shader from the global shader map */
 	TShaderMapRef<FCloudShader> ComputeShader(GlobalShaderMap, PermutationVector);
 
+	RDG_EVENT_SCOPE(GraphBuilder, "Vapor - Primary Integration Pass %dx%d", ViewSize.X, ViewSize.Y);
 	FComputeShaderUtils::AddPass(GraphBuilder,
-		RDG_EVENT_NAME("Vapor Cloud Rendering %dx%d", ViewSize.X, ViewSize.Y),
+		RDG_EVENT_NAME("Vapor - Primary Integration"),
 		ComputeShader, PassParameters, GroupCount);
 
 	/* Finally copy our output texture back onto the scene color texture */

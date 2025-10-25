@@ -22,16 +22,6 @@ RWTexture2D<float4> Output;
 static int STEP_COUNT = 0;
 #endif
 
-/// Calculate a distance-based step size for ray-marching.
-float CalcStepSize(const float Distance) {
-    // return Cloud.PrimaryNearStep + Distance * Cloud.PrimaryStepPerDistance;
-    return max(Cloud.PrimaryNearStep, sqrt(Distance) * Cloud.PrimaryStepPerDistance);
-}
-
-CloudSample SampleVolume(const float3 Point) {
-    return SampleCloud(Cloud, Point);
-}
-
 /// Anisotropic scattering function for clouds.
 /// Source: <https://www.guerrilla-games.com/read/nubis-cubed>
 float HenyeyGreenstein(float VdotL, float G) {
@@ -42,96 +32,129 @@ float HenyeyGreenstein(float VdotL, float G) {
     return num * rsqrt_denom * rsqrt_denom * rsqrt_denom * 0.07957747154594766788444188168626;
 }
 
-/// Trace the scene, find out how much light is being absorped.
-float3 TraceAbsorption(const float3 Origin, const float3 Dir, const float SunDot) {
-    // Sample the cache.
-    const float3 UVW = (Origin - Cloud.Position) / HALF_VOLUME_SIZE * 0.5 + 0.5;
-    const float2 CacheData = DensityCacheDataSRV.Sample(GlobalBilinearClampedSampler, UVW);
-    const float PathDensity = Remap(CacheData.x, 0.0, 1.0, 0.0, 32.0);
-    if (PathDensity == 32.0) return float3(0.0, 0.0, 0.0);
+/// Trace the scene, find out how much density lies along a given path.
+float TracePathDensity(const float3 WOrigin, const float3 WDir) {
+    // Find the distance at which we exit the bounds of the cloud volume.
+    const float WExitDistance = RayAABB(WOrigin, WDir, Cloud.Position - HALF_VOLUME_SIZE, Cloud.Position + HALF_VOLUME_SIZE).y;
     
-    // Beer's Law <https://en.wikipedia.org/wiki/Beer%E2%80%93Lambert_law>
-    const float3 InvAbsorption = -Cloud.Absorption * PathDensity;
+    // Traversal state.
+    float WDistance = 0.0, WPathDensity = 0.0;
     
-    // Multi-scatter approximation.
-    if (Cloud.MultiScattering) {
-        const RoughSample Sample = SampleCloudRough(Cloud, Origin);
-        const float InnerGlow = Remap(Sample.SDist, -12800.0, 0.0, 0.05, 0.25);
-        const float AnisotropicScattering = Remap(SunDot, 0.0, 0.9, 0.25, InnerGlow);
-        return exp(InvAbsorption) + exp(InvAbsorption * AnisotropicScattering);
+    for (uint s = 0; s < 256; ++s) {
+        // Check if we've exited the cloud volume.
+        if (WDistance >= WExitDistance) break;
+        
+        // Calculate the location of the current step, in world and local space.
+        const float3 WSampleLocation = WOrigin + WDir * WDistance;
+        const float3 LSampleLocation = WorldToCloudSpace(Cloud, WSampleLocation);
+        
+        // Sample the cloud volume signed distance field.
+        const float WCloudDistance = SampleCloudDistance(Cloud, LSampleLocation);
+        const float WStepSize = max(Cloud.SecondaryStep, WCloudDistance);
+        
+        // Check if the current step is *inside* the cloud volume.
+        if (WCloudDistance < 0.0) {
+            const float DimensionalProfile = DistanceToDimensionalProfile(Cloud, WCloudDistance);
+            WPathDensity += SampleCloudDensity(Cloud, DimensionalProfile, LSampleLocation) * WStepSize;
+            if (WPathDensity > Cloud.SecondaryExtinctThreshold) return 32.0;
+        }
+        
+        // Take the next step.
+        WDistance += WStepSize;
     }
-   
-    return exp(InvAbsorption);
+    
+    return WPathDensity;
 }
 
-float3 TraceVolume(const float3 ViewColor, const float3 Origin, const float3 Dir) {
-    // Intersect the bounds of the volume, return early if we miss.
-    const float2 BoundsIntersection = RayAABB(Origin, Dir, Cloud.Position - HALF_VOLUME_SIZE, Cloud.Position + HALF_VOLUME_SIZE);
-    if (BoundsIntersection.x > BoundsIntersection.y) return ViewColor;
+void IntegrateCloudSample(
+    inout float3 OutLuminance, inout float OutAbsorption, 
+    const float3 LSampleLocation, const float3 WSampleLocation,
+    const float WStepSize, const float WCloudDistance,
+    const float3 SunAnisotropy, const float SunDot
+) {
+    // Sample and uprezz the cloud density at the sample location.
+    const float DimensionalProfile = DistanceToDimensionalProfile(Cloud, WCloudDistance);
+    const float Density = SampleUprezzedCloudDensity(Cloud, DimensionalProfile, LSampleLocation, WSampleLocation);
+    const float StepDensity = WStepSize * Density;
     
-    // Traversal variables.
-    float Absorption = 0.0;
+    // Update the path absorption based on the density at the current path segment.
+    OutAbsorption = saturate(OutAbsorption + StepDensity * (1.0 - OutAbsorption));
+    
+    // Read path density information about the current location from the pre-computed cache.
+    const float2 CachedDensity = DensityCacheDataSRV.Sample(GlobalBilinearClampedSampler, LSampleLocation);
+    
+    // Calculate how much light from the sun reaches the sample location.
+    const float SunPathDensity = Remap(CachedDensity.x, 0.0, 1.0, 0.0, 32.0);
+    const float3 SunAbsorption = -Cloud.Absorption * SunPathDensity;
+    const float StepScattering = StepDensity * (1.0 - OutAbsorption);
+    const float3 SunScattering = SunAnisotropy * StepScattering;
+    
+    // Integrate direct out-scattering from the sun.
+    if (Cloud.DirectScattering) {
+        OutLuminance += SunScattering * exp(SunAbsorption);
+    }
+    
+    // Integrate multi-scattering approximation from the sun.
+    if (Cloud.MultiScattering) {
+        const float InnerGlow = Remap(WCloudDistance, -128.0, 0.0, 0.05, 0.25);
+        const float AnisotropicScattering = Remap(SunDot, 0.0, 0.9, 0.25, InnerGlow);
+        const float MultiScattering = DimensionalProfile * exp(-SunPathDensity * AnisotropicScattering);
+        // OutLuminance += Cloud.SunLuminance * StepScattering * DimensionalProfile * exp(SunAbsorption * AnisotropicScattering);
+        OutLuminance += Cloud.SunLuminance * StepScattering * MultiScattering; // * exp(-SunPathDensity);
+    }
+    
+    // Integrate ambient out-scattering from the environment.
+    if (Cloud.AmbientScattering) {
+        //const float AmbientDensity = Remap(CachedDensity.y, 0.0, 1.0, 0.0, 32.0);
+        //const float3 AmbientTransmittance = exp(-Cloud.Absorption * AmbientDensity);
+        OutLuminance += StepScattering * pow(1.0 - DimensionalProfile, 0.5) * Cloud.AmbientLuminance; // * AmbientTransmittance;
+    }
+}
+
+float3 TraceVolume(const float3 ViewColor, const float3 WOrigin, const float3 WDir) {
+    // Find the distance at which we enter & exit the bounds of the cloud volume.
+    const float2 WEntryExitDistance = RayAABB(WOrigin, WDir, Cloud.Position - HALF_VOLUME_SIZE, Cloud.Position + HALF_VOLUME_SIZE);
+    if (WEntryExitDistance.x > WEntryExitDistance.y) return ViewColor;
+    
+    // Traversal state.
+    float WDistance = WEntryExitDistance.x;
     float3 Luminance = 0.0;
-    float PathDensity = 0.0;
-    float Distance = max(0.0, BoundsIntersection.x);
+    float Absorption = 0.0;
     
-    // Sun out-scattering will be identical everywhere along the ray, so we pre-calculate it.
-    const float SunDot = dot(Dir, Cloud.SunDir);
-    const float3 Scattering = Cloud.SunLuminance * HenyeyGreenstein(SunDot, 0.2);
+    // Sun out-scattering will be identical everywhere along the ray, pre-calculate it.
+    const float SunDot = dot(WDir, Cloud.SunDir);
+    const float3 SunAnisotropy = Cloud.SunLuminance * HenyeyGreenstein(SunDot, 0.2);
     
     // Integrate luminance along the ray.
     for (uint s = 0; s < MAX_DIRECT_STEPS; ++s) {
-        if (Distance >= BoundsIntersection.y) break;
+        // Check if we've exited the cloud volume.
+        if (WDistance >= WEntryExitDistance.y) break;
         
-#if DEBUG
-        STEP_COUNT++;
-#endif
+        // Calculate the location of the current step, in world and local space.
+        const float3 WSampleLocation = WOrigin + WDir * WDistance;
+        const float3 LSampleLocation = WorldToCloudSpace(Cloud, WSampleLocation);
         
-        // Sample the volume at the current location.
-        const float3 SamplePos = Origin + Dir * Distance;
-        const CloudSample Sample = SampleVolume(SamplePos);
+        // Calculate an adaptive step size depending on distance from the camera.
+        const float WAdaptiveStepSize = max(Cloud.PrimaryNearStep, sqrt(WDistance) * Cloud.PrimaryStepPerDistance);
         
-        // No work to be done outside the volume, just keep stepping.
-        if (Sample.IsOutside()) {
-            Distance += max(Cloud.PrimaryMinSDFStep, Sample.SDist()); // Move along the ray to the next location.
-            continue;
-        }
-        const float StepSize = CalcStepSize(Distance);
-        Distance += StepSize;
+        // Sample the cloud volume signed distance field.
+        const float WCloudDistance = SampleCloudDistance(Cloud, LSampleLocation);
+        const float WStepSize = max(WCloudDistance, WAdaptiveStepSize);
         
-        // Calculate the total density along our step.
-        const float StepDensity = Sample.Density() * StepSize;
-        
-        // Integrate the absorption along the ray.
-        Absorption = saturate(Absorption + StepDensity * (1.0 - Absorption));
-        if (Absorption > 0.999) {
-            Absorption = 1.0;
-            break;
+        // Check if the current step is *inside* the cloud volume.
+        if (WCloudDistance < 0.0) {
+            IntegrateCloudSample(
+                Luminance,  // Out
+                Absorption, // Out
+                LSampleLocation, WSampleLocation,
+                WStepSize, WCloudDistance, 
+                SunAnisotropy, SunDot
+            );
         }
         
-        // Integrate density along the ray.
-        PathDensity += StepDensity;
-        
-        // Integrate direct out-scattering from the sun. 
-        if (Cloud.DirectScattering) {
-            Luminance += TraceAbsorption(SamplePos, Cloud.SunDir, SunDot) * Scattering * StepDensity * (1.0 - Absorption);
-        }
-        
-        // Integrate ambient out-scattering.
-        if (Cloud.AmbientScattering) {
-            // Sample the cache.
-            const float3 UVW = (SamplePos - Cloud.Position) / HALF_VOLUME_SIZE * 0.5 + 0.5;
-            const float2 CacheData = DensityCacheDataSRV.Sample(GlobalBilinearClampedSampler, UVW);
-            const float AmbientCoverage = CacheData.y;
-            
-            const RoughSample Sample = SampleCloudRough(Cloud, Origin);
-            const float DimensionalProfile = min(1.0, -Sample.SDist / Cloud.ProfileWidth);
-            Luminance += pow(1.0 - DimensionalProfile, 0.5) * Cloud.AmbientLuminance * StepDensity * (1.0 - Absorption) * exp(-AmbientCoverage * Cloud.Absorption);
-        }
+        // Take the next step.
+        WDistance += WStepSize;
     }
-    
-    // Beer's Law <https://en.wikipedia.org/wiki/Beer%E2%80%93Lambert_law>
-    // const float3 PathAbsorption = exp(-Cloud.Absorption * PathDensity);
     
     // Finally, combine the view color with the luminance based on the absorption.
     return ViewColor * (1.0 - Absorption) + Luminance;
@@ -149,8 +172,8 @@ void MainCS(uint2 DispatchThreadId : SV_DispatchThreadID) {
     // Calculate the UV coordinate of the current pixel.
     const float2 UV = GetPixelUV(Pixel);
     
-    // Get the ray origin & direction.
-    const float3 RayOrigin = GetRayOrigin();
+    // Get the ray origin (in Meters) & direction.
+    const float3 RayOrigin = GetRayOrigin() * CM_TO_M;
     const float3 RayDirection = GetRayDirection(UV);
     
     // Ray vs Sphere intersection test.

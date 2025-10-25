@@ -1,76 +1,79 @@
 #include "Common.ush"
 #include "Cloud.ush"
 
-static const uint MAX_STEPS = 256;
+static const uint MAX_STEPS = 128;
 static const uint MAX_AMBIENT_STEPS = 32;
+static const float MAX_PATH_DENSITY = 32.0;
 
 // Cloud Parameters
 ConstantBuffer<CloudInstance> Cloud;
 RWTexture3D<float2> DensityCacheData;
 
 /// Trace the scene, find out how much density lies along a given path.
-float TracePathDensity(const float3 Origin, const float3 Dir) {
-    // Intersect the bounds of the volume.
-    const float2 BoundsIntersection = RayAABB(Origin, Dir, Cloud.Position - HALF_VOLUME_SIZE, Cloud.Position + HALF_VOLUME_SIZE);
+float TracePathDensity(const float3 WOrigin, const float3 WDir) {
+    // Find the distance at which we exit the bounds of the cloud volume.
+    const float WExitDistance = RayAABB(WOrigin, WDir, Cloud.Position - HALF_VOLUME_SIZE, Cloud.Position + HALF_VOLUME_SIZE).y;
     
-    // Traversal variables.
-    const float PathDensityThreshold = CalcPathDensityThreshold(Cloud.SecondaryExtinctThreshold, Cloud.Absorption);
-    float Distance = 0.0;
-    float PathDensity = 0.0;
+    // Traversal state.
+    float WDistance = 0.0, WPathDensity = 0.0;
     
     for (uint s = 0; s < MAX_STEPS; ++s) {
-        if (Distance >= BoundsIntersection.y) break;
+        // Check if we've exited the cloud volume.
+        if (WDistance >= WExitDistance) break;
         
-        // Sample the rough volume.
-        const float3 SamplePos = Origin + Dir * Distance;
-        const RoughSample Sample = SampleCloudRough(Cloud, SamplePos);
+        // Calculate the location of the current step, in world and local space.
+        const float3 WSampleLocation = WOrigin + WDir * WDistance;
+        const float3 LSampleLocation = WorldToCloudSpace(Cloud, WSampleLocation);
         
-        // No work to be done outside the volume, just keep stepping.
-        if (Sample.SDist > 0.0) {
-            Distance += max(Cloud.PrimaryMinSDFStep, Sample.SDist);
-            continue;
+        // Sample the cloud volume signed distance field.
+        const float WCloudDistance = SampleCloudDistance(Cloud, LSampleLocation);
+        const float WStepSize = max(Cloud.SecondaryStep, WCloudDistance);
+        
+        // Check if the current step is *inside* the cloud volume.
+        if (WCloudDistance < 0.0) {
+            const float DimensionalProfile = DistanceToDimensionalProfile(Cloud, WCloudDistance);
+            WPathDensity += SampleCloudDensity(Cloud, DimensionalProfile, LSampleLocation) * WStepSize;
+            if (WPathDensity > Cloud.SecondaryExtinctThreshold) return MAX_PATH_DENSITY;
         }
-        Distance += Cloud.SecondaryStep;
         
-        // We're inside the volume, accumulate density.
-        PathDensity += Sample.Density * Cloud.SecondaryStep;
-        if (PathDensity > PathDensityThreshold) break;
+        // Take the next step.
+        WDistance += WStepSize;
     }
     
-    return PathDensity;
+    return WPathDensity;
 }
 
 /// Trace the scene, find out aproximately how much occlusion there is within a cone.
-float TraceAmbientCone(const float3 Origin) {
-    // Intersect the bounds of the volume.
-    const float3 AmbientDir = float3(0.0, 0.0, 1.0);
-    const float2 BoundsIntersection = RayAABB(Origin, AmbientDir, Cloud.Position - HALF_VOLUME_SIZE, Cloud.Position + HALF_VOLUME_SIZE);
+//float TraceAmbientCone(const float3 Origin) {
+//    // Intersect the bounds of the volume.
+//    const float3 AmbientDir = float3(0.0, 0.0, 1.0);
+//    const float2 BoundsIntersection = RayAABB(Origin, AmbientDir, Cloud.Position - HALF_VOLUME_SIZE, Cloud.Position + HALF_VOLUME_SIZE);
     
-    // Traversal variables.
-    const float HalfAngle = 0.55; // ~35 deg
-    const float TanHalfAngle = tan(HalfAngle);
-    float Distance = 3200.0;
-    float PathDensity = 0.0;
+//    // Traversal variables.
+//    const float HalfAngle = 0.55; // ~35 deg
+//    const float TanHalfAngle = tan(HalfAngle);
+//    float Distance = 3200.0;
+//    float PathDensity = 0.0;
     
-    for (uint s = 0; s < MAX_AMBIENT_STEPS; ++s) {
-        if (Distance >= BoundsIntersection.y) break;
-        const float ConeRadius = TanHalfAngle * Distance;
-        const float ConeDiameter = ConeRadius * 2.0;
+//    for (uint s = 0; s < MAX_AMBIENT_STEPS; ++s) {
+//        if (Distance >= BoundsIntersection.y) break;
+//        const float ConeRadius = TanHalfAngle * Distance;
+//        const float ConeDiameter = ConeRadius * 2.0;
         
-        // Sample the rough volume.
-        const float3 SamplePos = Origin + AmbientDir * Distance;
-        const RoughSample Sample = SampleCloudRough(Cloud, SamplePos);
+//        // Sample the rough volume.
+//        const float3 SamplePos = Origin + AmbientDir * Distance;
+//        const RoughSample Sample = SampleCloudRough(Cloud, SamplePos);
         
-        // Some of the cloud is inside the cone at the current step.
-        if (Sample.SDist < ConeRadius) {
-            const float Coverage = 1.0 - max(0.0, Sample.SDist + ConeRadius) / ConeDiameter;
-            PathDensity += (1.0 - PathDensity) * (Coverage * Coverage);
-        }
-        Distance += ConeDiameter;
-    }
+//        // Some of the cloud is inside the cone at the current step.
+//        if (Sample.SDist < ConeRadius) {
+//            const float Coverage = 1.0 - max(0.0, Sample.SDist + ConeRadius) / ConeDiameter;
+//            PathDensity += (1.0 - PathDensity) * (Coverage * Coverage);
+//        }
+//        Distance += ConeDiameter;
+//    }
     
-    return PathDensity;
-}
+//    return PathDensity;
+//}
 
 // Compute Shader code
 [numthreads(THREADS_X, THREADS_Y, THREADS_Z)]
@@ -79,20 +82,20 @@ void MainCS(uint3 DispatchThreadId : SV_DispatchThreadID) {
     const uint FrameIndex = View.FrameCounter;
     const uint3 OutputId = (DispatchThreadId << 1u) + uint3(FrameIndex & 1u, (FrameIndex >> 1u) & 1u, (FrameIndex >> 2u) & 1u);
     const float3 Voxel = float3(OutputId) * 2.0 + 1.0;
-    const float3 Origin = (Cloud.Position - HALF_VOLUME_SIZE) + Voxel * UNITS_PER_VOXEL;
+    const float3 WOrigin = (Cloud.Position - HALF_VOLUME_SIZE) + Voxel * METERS_PER_VOXEL;
     
     // Check if there's cloud at the origin, if not, exit early.
-    const RoughSample OriginSample = SampleCloudRough(Cloud, Origin);
-    if (OriginSample.SDist > 0.0) return;
+    const float WCloudDistance = SampleCloudDistance(Cloud, WorldToCloudSpace(Cloud, WOrigin));
+    if (WCloudDistance > 0.0) return;
     
     // Trace the path density toward the sun for this cache slot.
-    const float PathDensity = TracePathDensity(Origin, Cloud.SunDir);
+    const float WPathDensity = TracePathDensity(WOrigin, Cloud.SunDir);
     // const float AmbientDensity = TraceAmbientCone(Origin);
-    const float AmbientDensity = TracePathDensity(Origin, float3(0.0, 0.0, 1.0));
+    const float AmbientDensity = TracePathDensity(WOrigin, float3(0.0, 0.0, 1.0));
     
     // Store the path density data into the cache slot.
     DensityCacheData[OutputId] = float2(
-        Remap(PathDensity, 0.0, 32.0, 0.0, 1.0),
-        Remap(AmbientDensity, 0.0, 32.0, 0.0, 1.0)
+        Remap(WPathDensity, 0.0, MAX_PATH_DENSITY, 0.0, 1.0),
+        Remap(AmbientDensity, 0.0, MAX_PATH_DENSITY, 0.0, 1.0)
     );
 }

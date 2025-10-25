@@ -30,13 +30,13 @@ class UVaporComponent : public UPrimitiveComponent {
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cloud Volume")
 	float Density = 0.01f;
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cloud Volume", meta = (Units = "Centimeters", ToolTip = "Width of the dimensional profile."))
-	float ProfileWidth = 16000.0f; // cm
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cloud Volume", meta = (Units = "Meters", ToolTip = "Width of the dimensional profile."))
+	float ProfileWidth = 160.0f; // m
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cloud Volume", meta = (Units = "Hertz", ToolTip = "Frequency of the noise applied to the cloud."))
 	float NoiseFrequency = 0.0001f; // hz
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cloud Volume", meta = (Units = "CentimetersPerSecondSquared"))
-	FVector3f WindSpeed = FVector3f(0.0f, 0.0f, 400.0f); // cm/s2
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cloud Volume", meta = (Units = "MetersPerSecondSquared"))
+	FVector3f WindSpeed = FVector3f(0.0f, 0.0f, 4.0f); // m/s2
 
 	/* -===- Cloud Lighting Section -===- */
 
@@ -47,20 +47,20 @@ class UVaporComponent : public UPrimitiveComponent {
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cloud Lighting")
 	bool AmbientScattering = true;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cloud Lighting", meta = (Units = "Times", EditCondition = "AmbientScattering"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cloud Lighting", meta = (Units = "Times", EditCondition = "AmbientScattering", EditConditionHides))
 	float AmbientStrength = 1.0f;
 
 	/* -===- Cloud Quality Section -===- */
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cloud Quality", meta = (Units = "Centimeters"))
-	float PrimaryNearStep = 200.0f; // cm
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cloud Quality", meta = (Units = "Meters"))
+	float PrimaryNearStep = 2.0f; // m
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cloud Quality", meta = (Units = "Times"))
 	float PrimaryStepPerDistance = 0.08f;
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cloud Quality", meta = (Units = "Centimeters"))
-	float PrimaryMinSDFStep = 200.0f; // cm
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cloud Quality", meta = (Units = "Meters"))
+	float PrimaryMinSDFStep = 2.0f; // m
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cloud Quality", meta = (Units = "Centimeters"))
-	float SecondaryStep = 800.0f; // cm
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cloud Quality", meta = (Units = "Meters"))
+	float SecondaryStep = 8.0f; // m
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cloud Quality", meta = (Units = "Percent"))
 	float SecondaryExtinctThreshold = 0.0f; // %
 

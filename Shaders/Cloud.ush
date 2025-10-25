@@ -4,39 +4,21 @@
 #include "/Engine/Private/Common.ush"
 #include "Common.ush"
 
-static const float UNITS_PER_VOXEL = 800.0; // 8 m
-
+// Volume constants.
+static const float METERS_PER_VOXEL = 8.0; // 8 m
+static const float VOXELS_PER_METER = 1.0 / METERS_PER_VOXEL;
 static const float3 VOLUME_RESOLUTION = float3(512, 512, 64);
-static const float3 VOLUME_SIZE = UNITS_PER_VOXEL * VOLUME_RESOLUTION;
+static const float3 VOLUME_SIZE = METERS_PER_VOXEL * VOLUME_RESOLUTION;
 static const float3 HALF_VOLUME_SIZE = VOLUME_SIZE * 0.5;
+static const float3 RCP_VOLUME_SIZE = 1.0 / VOLUME_SIZE;
+static const float3 RCP_HALF_VOLUME_SIZE = 1.0 / HALF_VOLUME_SIZE;
 
 /// 4 types of noise packed into a single texture.
 /// Channels: HFAlligator, HFCurlyWorley, LFAlligator, LFCurlyWorley
 Texture3D<float4> Noise;
 
-/// Sample taken from a cloud.
-struct CloudSample {
-    float Value;
-    
-    /// Create a cloud sample which resides outside the cloud.
-    static CloudSample Outside(const float SDist) { return (CloudSample)SDist; }
-    /// Create a cloud sample which resides inside the cloud.
-    static CloudSample Inside(const float Density) { return (CloudSample)(-Density); }
-    
-    /// Returns true if this sample is outside the volume.
-    inline bool IsOutside() { return Value > 0.0; }
-    /// Returns the density of the cloud for this sample. (if `IsOutside() == false`)
-    inline float Density() { return -Value; }
-    /// Returns the signed distance to the cloud for this sample. (if `IsOutside() == true`)
-    inline float SDist() { return Value; }
-};
-
-struct RoughSample {
-    float SDist;
-    float Density;
-};
-
 /// Collection of data required to render a cloud.
+/// All length/distance values are expressed in Meters.
 struct CloudInstance {
     // Volume Data
     float3 Position;
@@ -70,66 +52,63 @@ struct CloudInstance {
     Texture3D<float> SDFTexture;
 };
 
-/// Calculate the threshold path density at which the absorption reaches a given threshold.
-float CalcPathDensityThreshold(const float AbsorptionThreshold, const float3 Absorption) {
-    return -log(AbsorptionThreshold) / min(min(Absorption.r, Absorption.g), Absorption.b);
-}
-
 float ValueErosion(const float Value, const float Erosion) {
 	const float InvErosion = (1.0 - Erosion);
     return saturate((Value - Erosion) / InvErosion);
 }
 
-/// Sample the cloud.
-CloudSample SampleCloud(ConstantBuffer<CloudInstance> Cloud, const float3 Point) {
-    const float3 UVW = (Point - Cloud.Position) / HALF_VOLUME_SIZE * 0.5 + 0.5;
-    
-    // Sample the Signed Distance Field.
+/// Transform a position from world-space to cloud texture-space.
+/// NOTE: `Point` is expected to be in Meters. (not the usual Centimeters which UE uses as units)
+float3 WorldToCloudSpace(ConstantBuffer<CloudInstance> Cloud, const float3 Point) {
+    return (Point - Cloud.Position) * RCP_HALF_VOLUME_SIZE * 0.5 + 0.5;
+}
+
+/// Sample the cloud SDF.
+float SampleCloudDistance(ConstantBuffer<CloudInstance> Cloud, const float3 LSampleLocation) {
     // The SDF is stored from -32 to 512 in a UNorm texture encoded in voxel-space.
-    const float NormSDist = Cloud.SDFTexture.Sample(GlobalBilinearClampedSampler, UVW);
-    const float SDist = (NormSDist * (32.0 + 512.0) - 32.0) * UNITS_PER_VOXEL;
+    const float NormDistance = Cloud.SDFTexture.Sample(GlobalBilinearClampedSampler, LSampleLocation);
+    return (NormDistance * (32.0 + 512.0) - 32.0) * METERS_PER_VOXEL;
+}
+
+/// Convert the SDF of a cloud to a dimensional profile.
+float DistanceToDimensionalProfile(ConstantBuffer<CloudInstance> Cloud, const float Distance) {
+    return saturate(-Distance / Cloud.ProfileWidth);
+}
+
+/// Sample the cloud density.
+float SampleCloudDensity(ConstantBuffer<CloudInstance> Cloud, const float DimensionalProfile, const float3 LSampleLocation) {
+    // Sample the density scale texture.
+    const float DensityScale = Cloud.DensityTexture.Sample(GlobalBilinearClampedSampler, LSampleLocation);
     
-    // If the distance is above zero, we're outside the cloud, return the signed distance.
-    if (SDist > 0.0) return CloudSample::Outside(SDist);
+    // Remap the density scale and apply it to the dimensional profile.
+    const float PowDensity = pow(saturate(DensityScale * Cloud.Density), 4.0);
+    const float ScaledDensity = DimensionalProfile * PowDensity;
+    return pow(ScaledDensity, lerp(0.3, 0.6, max(0.00001, PowDensity)));
+}
+
+/// Sample the cloud density with noise applied to appear higher resolution.
+float SampleUprezzedCloudDensity(ConstantBuffer<CloudInstance> Cloud, const float DimensionalProfile, const float3 LSampleLocation, const float3 WSampleLocation) {
+    // Sample the density scale texture.
+    const float DensityScale = Cloud.DensityTexture.Sample(GlobalBilinearClampedSampler, LSampleLocation);
     
-    // We're inside the volume, so we fetch the density and return it instead.
-    const float Density = Cloud.DensityTexture.Sample(GlobalBilinearClampedSampler, UVW);
+    // Noise texture sampling.
+    const float3 SweptUVW = WSampleLocation - Cloud.WindSpeed * View.GameTime;
+    const float3 NoiseUVW = SweptUVW * Cloud.NoiseFreq;
+    const float4 NoiseSample = Noise.Sample(GlobalBilinearWrappedSampler, NoiseUVW);
     
-    const float3 WindOffset = Cloud.WindSpeed * View.GameTime;
-    const float4 NoiseSample = Noise.Sample(GlobalBilinearWrappedSampler, (Point - WindOffset) * Cloud.NoiseFreq);
+    // Wispy noise. (used in areas of decreasing pressure)
+    const float WispyNoise = lerp(NoiseSample.a, NoiseSample.g, DimensionalProfile);
     
-    const float DimensionalProfile = min(1.0, -SDist / Cloud.ProfileWidth);
+    // Billowy noise. (used in areas of increasing pressure)
     const float BillowyFreqGradient = pow(DimensionalProfile, 0.25);
     const float BillowyNoise = lerp(NoiseSample.b * 0.3, NoiseSample.r * 0.3, BillowyFreqGradient);
 
-    float ErodedDensity = ValueErosion(DimensionalProfile, BillowyNoise);
-    // Modify User density scale
-    const float PowDensity = pow(saturate(Density * Cloud.Density), 4.0);
-    // Apply User Density Scale Data to Result
-    ErodedDensity *= PowDensity;
-    // Sharpen result and lower Density close to camera to both add details and reduce undersampling noise
-    ErodedDensity = pow(ErodedDensity, lerp(0.3, 0.6, max(0.00001, PowDensity)));
-    return CloudSample::Inside(ErodedDensity);
-}
-
-RoughSample SampleCloudRough(ConstantBuffer<CloudInstance> Cloud, const float3 Point) {
-    const float3 UVW = (Point - Cloud.Position) / HALF_VOLUME_SIZE * 0.5 + 0.5;
-    RoughSample Sample;
+    // Composite the two kinds of noise and apply it to the dimensional profile.
+    const float NoiseComposite = lerp(WispyNoise, BillowyNoise, 1.0); // TODO: Interpolate noises.
+    const float ErodedProfile = ValueErosion(DimensionalProfile, NoiseComposite);
     
-    // Sample the Signed Distance Field.
-    // The SDF is stored from -32 to 512 in a UNorm texture encoded in voxel-space.
-    const float NormSDist = Cloud.SDFTexture.Sample(GlobalBilinearClampedSampler, UVW);
-    Sample.SDist = (NormSDist * (32.0 + 512.0) - 32.0) * UNITS_PER_VOXEL;
-    const float DimensionalProfile = min(1.0, -Sample.SDist / Cloud.ProfileWidth);
-    
-    // We're inside the volume, so we fetch the density and return it instead.
-    const float DensityScale = Cloud.DensityTexture.Sample(GlobalBilinearClampedSampler, UVW);
-    Sample.Density = DimensionalProfile; // Cloud.DensityTexture.Sample(GlobalBilinearClampedSampler, UVW);
-    // Modify User density scale
+    // Finally, apply the user defined density scale.
     const float PowDensity = pow(saturate(DensityScale * Cloud.Density), 4.0);
-    // Apply User Density Scale Data to Result
-    Sample.Density *= PowDensity;
-    // Sharpen result and lower Density close to camera to both add details and reduce undersampling noise
-    Sample.Density = pow(Sample.Density, lerp(0.3, 0.6, max(0.00001, PowDensity)));
-    return Sample;
+    const float ScaledDensity = ErodedProfile * PowDensity;
+    return pow(ScaledDensity, lerp(0.3, 0.6, max(0.00001, PowDensity)));
 }
