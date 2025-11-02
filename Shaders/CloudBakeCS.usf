@@ -2,7 +2,7 @@
 #include "Cloud.ush"
 
 static const uint MAX_STEPS = 128;
-static const uint MAX_AMBIENT_STEPS = 32;
+static const uint MAX_AMBIENT_STEPS = 64;
 static const float MAX_PATH_DENSITY = 32.0;
 
 // Cloud Parameters
@@ -44,36 +44,38 @@ float TracePathDensity(const float3 WOrigin, const float3 WDir) {
 }
 
 /// Trace the scene, find out aproximately how much occlusion there is within a cone.
-//float TraceAmbientCone(const float3 Origin) {
-//    // Intersect the bounds of the volume.
-//    const float3 AmbientDir = float3(0.0, 0.0, 1.0);
-//    const float2 BoundsIntersection = RayAABB(Origin, AmbientDir, Cloud.Position - HALF_VOLUME_SIZE, Cloud.Position + HALF_VOLUME_SIZE);
+float TraceAmbientCone(const float3 WOrigin, const float3 WDir) {
+    // Intersect the bounds of the volume.
+    const float WExitDistance = RayAABB(WOrigin, WDir, Cloud.Position - HALF_VOLUME_SIZE, Cloud.Position + HALF_VOLUME_SIZE).y;
     
-//    // Traversal variables.
-//    const float HalfAngle = 0.55; // ~35 deg
-//    const float TanHalfAngle = tan(HalfAngle);
-//    float Distance = 3200.0;
-//    float PathDensity = 0.0;
+    // Traversal variables.
+    const float HalfAngle = 0.6; // ~35 deg
+    const float TanHalfAngle = tan(HalfAngle);
+    float WDistance = 24.0; // m
+    float WOcclusion = 0.0;
     
-//    for (uint s = 0; s < MAX_AMBIENT_STEPS; ++s) {
-//        if (Distance >= BoundsIntersection.y) break;
-//        const float ConeRadius = TanHalfAngle * Distance;
-//        const float ConeDiameter = ConeRadius * 2.0;
+    for (uint s = 0; s < MAX_AMBIENT_STEPS; ++s) {
+        if (WDistance >= WExitDistance) break;
+        const float WConeRadius = TanHalfAngle * WDistance;
+        const float WConeDiameter = WConeRadius * 2.0;
         
-//        // Sample the rough volume.
-//        const float3 SamplePos = Origin + AmbientDir * Distance;
-//        const RoughSample Sample = SampleCloudRough(Cloud, SamplePos);
+        // Calculate the location of the current step, in world and local space.
+        const float3 WSampleLocation = WOrigin + WDir * WDistance;
+        const float3 LSampleLocation = WorldToCloudSpace(Cloud, WSampleLocation);
         
-//        // Some of the cloud is inside the cone at the current step.
-//        if (Sample.SDist < ConeRadius) {
-//            const float Coverage = 1.0 - max(0.0, Sample.SDist + ConeRadius) / ConeDiameter;
-//            PathDensity += (1.0 - PathDensity) * (Coverage * Coverage);
-//        }
-//        Distance += ConeDiameter;
-//    }
+        // Sample the cloud volume signed distance field.
+        const float WCloudDistance = max(0.0, SampleCloudDistance(Cloud, LSampleLocation));
+        
+        // Some of the cloud is inside the cone at the current step.
+        if (WCloudDistance < WConeRadius) {
+            const float Coverage = (WConeRadius - WCloudDistance) / WConeRadius;
+            WOcclusion += (1.0 - WOcclusion) * (Coverage * 0.5);
+        }
+        WDistance += WConeDiameter;
+    }
     
-//    return PathDensity;
-//}
+    return WOcclusion;
+}
 
 // Compute Shader code
 [numthreads(THREADS_X, THREADS_Y, THREADS_Z)]
@@ -90,12 +92,19 @@ void MainCS(uint3 DispatchThreadId : SV_DispatchThreadID) {
     
     // Trace the path density toward the sun for this cache slot.
     const float WPathDensity = TracePathDensity(WOrigin, Cloud.SunDir);
-    // const float AmbientDensity = TraceAmbientCone(Origin);
-    const float AmbientDensity = TracePathDensity(WOrigin, float3(0.0, 0.0, 1.0));
+    
+    float AmbientOcclusion = 0.0;
+    AmbientOcclusion += TraceAmbientCone(WOrigin, float3( 1.0,  0.0,  0.0)) * 0.125;
+    AmbientOcclusion += TraceAmbientCone(WOrigin, float3(-1.0,  0.0,  0.0)) * 0.125;
+    AmbientOcclusion += TraceAmbientCone(WOrigin, float3( 0.0,  1.0,  0.0)) * 0.125;
+    AmbientOcclusion += TraceAmbientCone(WOrigin, float3( 0.0, -1.0,  0.0)) * 0.125;
+    AmbientOcclusion += TraceAmbientCone(WOrigin, float3( 0.0,  0.0,  1.0)) * 0.500;
+    
+    // const float AmbientDensity = TracePathDensity(WOrigin, float3(0.0, 0.0, 1.0));
     
     // Store the path density data into the cache slot.
     DensityCacheData[OutputId] = float2(
         Remap(WPathDensity, 0.0, MAX_PATH_DENSITY, 0.0, 1.0),
-        Remap(AmbientDensity, 0.0, MAX_PATH_DENSITY, 0.0, 1.0)
+        saturate(AmbientOcclusion)
     );
 }

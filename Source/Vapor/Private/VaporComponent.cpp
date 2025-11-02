@@ -26,7 +26,7 @@ static float CalcPathDensityThreshold(const float AbsorptionThreshold, const FVe
 
 void UVaporComponent::IntoRenderData(FCloudscapeRenderData& RenderData) const {
 	RenderData.Absorption = ColorSpecifier == ECloudColorSpecifier::Absorption ? FVector3f(Absorption) : GetAbsorption();
-	RenderData.AmbientLuminance = FVector3f(AmbientStrength, AmbientStrength, AmbientStrength);
+	RenderData.AmbientLuminance = FVector3f(AmbientLuminance);
 	RenderData.Density = Density;
 	RenderData.ProfileWidth = ProfileWidth;
 	RenderData.PrimaryNearStep = PrimaryNearStep;

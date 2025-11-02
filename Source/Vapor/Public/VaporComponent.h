@@ -48,7 +48,7 @@ class UVaporComponent : public UPrimitiveComponent {
 	bool AmbientScattering = true;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cloud Lighting", meta = (Units = "Times", EditCondition = "AmbientScattering", EditConditionHides))
-	float AmbientStrength = 1.0f;
+	FLinearColor AmbientLuminance = FLinearColor(1.0f, 1.0f, 1.0f);
 
 	/* -===- Cloud Quality Section -===- */
 

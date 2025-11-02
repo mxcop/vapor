@@ -98,16 +98,18 @@ void IntegrateCloudSample(
     if (Cloud.MultiScattering) {
         const float InnerGlow = Remap(WCloudDistance, -128.0, 0.0, 0.05, 0.25);
         const float AnisotropicScattering = Remap(SunDot, 0.0, 0.9, 0.25, InnerGlow);
-        const float MultiScattering = DimensionalProfile * exp(-SunPathDensity * AnisotropicScattering);
+        const float3 MultiScattering = DimensionalProfile * exp(SunAbsorption * AnisotropicScattering);
         // OutLuminance += Cloud.SunLuminance * StepScattering * DimensionalProfile * exp(SunAbsorption * AnisotropicScattering);
         OutLuminance += Cloud.SunLuminance * StepScattering * MultiScattering; // * exp(-SunPathDensity);
     }
     
     // Integrate ambient out-scattering from the environment.
     if (Cloud.AmbientScattering) {
+        const float AmbientOcclusion = CachedDensity.y;
+        const float3 AmbientLuminance = Cloud.AmbientLuminance * (1.0 - AmbientOcclusion);
         //const float AmbientDensity = Remap(CachedDensity.y, 0.0, 1.0, 0.0, 32.0);
         //const float3 AmbientTransmittance = exp(-Cloud.Absorption * AmbientDensity);
-        OutLuminance += StepScattering * pow(1.0 - DimensionalProfile, 0.5) * Cloud.AmbientLuminance; // * AmbientTransmittance;
+        OutLuminance += StepScattering * pow(1.0 - DimensionalProfile, 0.5) * AmbientLuminance; // * AmbientTransmittance;
     }
 }
 

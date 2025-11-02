@@ -104,12 +104,12 @@ openvdb::FloatGrid::Ptr ResampleGrid(const openvdb::BBoxd& WorldAABB, const open
 				));
 
 				if (ScaleGrid != nullptr) {
-					const openvdb::tools::GridSampler<openvdb::FloatGrid, openvdb::tools::BoxSampler> ScaleSampler(*FilteredScale);
-					Value = ScaleSampler.wsSample(openvdb::Vec3d(
-						WorldAABB.min().x() + x * StepSizes.x(),
-						WorldAABB.min().y() + z * StepSizes.y(),
-						WorldAABB.min().z() + y * StepSizes.z()
-					));
+					//const openvdb::tools::GridSampler<openvdb::FloatGrid, openvdb::tools::BoxSampler> ScaleSampler(*FilteredScale);
+					//Value *= ScaleSampler.wsSample(openvdb::Vec3d(
+					//	WorldAABB.min().x() + x * StepSizes.x(),
+					//	WorldAABB.min().y() + z * StepSizes.y(),
+					//	WorldAABB.min().z() + y * StepSizes.z()
+					//));
 					
 					//const float PowScale = FMath::Pow(FMath::Clamp(DensityScale, 0.0f, 1.0f), 4.0f);
 					//Value *= PowScale;
