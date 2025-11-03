@@ -113,7 +113,7 @@ void IntegrateCloudSample(
     }
 }
 
-float3 TraceVolume(const float3 ViewColor, const float3 WOrigin, const float3 WDir) {
+float3 TraceVolume(const float3 ViewColor, const float3 WOrigin, const float3 WDir, const float WDepth) {
     // Find the distance at which we enter & exit the bounds of the cloud volume.
     const float2 WEntryExitDistance = RayAABB(WOrigin, WDir, Cloud.Position - HALF_VOLUME_SIZE, Cloud.Position + HALF_VOLUME_SIZE);
     if (WEntryExitDistance.x > WEntryExitDistance.y) return ViewColor;
@@ -130,7 +130,7 @@ float3 TraceVolume(const float3 ViewColor, const float3 WOrigin, const float3 WD
     // Integrate luminance along the ray.
     for (uint s = 0; s < MAX_DIRECT_STEPS; ++s) {
         // Check if we've exited the cloud volume.
-        if (WDistance >= WEntryExitDistance.y) break;
+        if (WDistance >= WEntryExitDistance.y || WDistance >= WDepth) break;
         
         // Calculate the location of the current step, in world and local space.
         const float3 WSampleLocation = WOrigin + WDir * WDistance;
@@ -178,8 +178,12 @@ void MainCS(uint2 DispatchThreadId : SV_DispatchThreadID) {
     const float3 RayOrigin = GetRayOrigin() * CM_TO_M;
     const float3 RayDirection = GetRayDirection(UV);
     
+    // Get the depth of the current pixel.
+    // const float DeviceZ = SceneDepth[Pixel];
+    const float WDepth = (ConvertFromDeviceZ(SceneDepth[Pixel]) / dot(RayDirection, View.ViewForward)) * CM_TO_M; // TransformPixelDepth(DeviceZ, RayDirection);
+    
     // Ray vs Sphere intersection test.
-    const float3 FinalColor = TraceVolume(SceneColor[Pixel], RayOrigin, RayDirection);
+    const float3 FinalColor = TraceVolume(SceneColor[Pixel], RayOrigin, RayDirection, WDepth);
     
 #if DEBUG
     Output[Pixel] = float4((float)STEP_COUNT / (float)MAX_DIRECT_STEPS, 0.0, 0.0, 1.0);
